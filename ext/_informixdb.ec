@@ -1414,7 +1414,6 @@ void init_informixdb()
 #else
   PyObject *m = Py_InitModule("_informixdb", globalMethods);
 #endif
-  //ifxdbError = Py_BuildValue("s", "InformixdbError");
   ifxdbError = PyErr_NewException("informixdb.Error", NULL, NULL);
   PyDict_SetItemString (PyModule_GetDict (m), "Error", ifxdbError);
 

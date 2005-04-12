@@ -1,0 +1,229 @@
+INTRODUCTION
+============
+
+This is informixdb 1.4, an Informix implementation of the Python
+Database API.  This release corresponds to version 1.0 of the DB-API:
+
+  http://www.python.org/topics/database/DatabaseAPI-1.0.html
+
+It consists of two components:
+
+- `informixdb', a Python module that implements the DB-API.
+- `_informixdb', a Python C extension used internally by `informixdb'
+  that interfaces with INFORMIX-ESQL/C.
+
+It is released under a BSD-like license.  See the COPYRIGHT file
+included with this distribution for more details.
+
+
+INSTALLATION (UNIX)
+===================
+
+This distribution uses GNU autoconf and Python distutils to build and install
+the informixdb module.  It should work with Python 1.5.2 or later as long as
+distutils is present.
+
+
+In a hurry?
+-----------
+
+Extract the source distribution, and `cd' to the top-level directory.
+Type `./configure', `python setup.py build' and `python setup.py install'.
+
+Or want the details?
+--------------------
+
+First, extract the source distribution on a machine with Python 1.5.2 or
+later and INFORMIX-ESQL/C, and `cd' to the top-level directory.
+
+Next, run the configuration script `./configure', giving it any of the
+following build options:
+
+  --with-informix=DIR
+
+  Look for INFORMIX-ESQL/C to be installed in `DIR'.  If omitted, it
+  defaults to the value of the INFORMIXDIR environment variable, or
+  else /usr/informix.
+
+  --disable-shared
+
+  Disable the use of Informix shared libraries.  The default is to use
+  shared libraries if available.  With this option, you can require
+  the Informix static libraries to instead be used.
+
+  --enable-thread=LIB
+
+  Enable the use of thread-safe Informix libraries, so that multiple Python
+  threads can use informixdb concurrently.
+
+The configuration script looks for the first occurrence of `python' on
+the PATH to determine which version of Python to build against.  To
+name a different interpreter, set the PYTHON environment variable
+to its full path prior to running the script, as in:
+
+  $ PYTHON=/usr/local/bin/python2.2 ./configure
+
+You are now ready to type `python setup.py build'.  Assuming this works ;-),
+type `python setup.py install', which will install the package into the
+appropriate site-specific library path.
+
+
+INSTALLATION (Win32)
+====================
+
+I'm afraid you're on your own.  distutils should do the Right Thing, but
+I don't have a Windows box to try this.
+
+
+NEWS
+====
+
+From 1.3 to 1.4:
+
+- Ported from "Makefile.pre.in" mechanism to distutils.
+- Allow passing username and password for connecting to remote databases.
+- Expose sqlerrd.
+- Trivial baby steps towards DB-API version 2 compliance.
+
+From 1.2 to 1.3:
+
+- Fixed the `fetch{one|many|all}' method output types and/or values
+  for several SQL types.  See ChangeLog for more info.
+
+From 1.01 to 1.2:
+
+- `informixdb' now exports `error' as a module global.  It previously
+  was only available as a connection attribute.
+
+- The `execute' method for connections now returns a value.  It
+  previously returned `None'.
+
+- The `execute' method no longer limits operation strings to 2000
+  characters or less.  Strings longer than this used to cause stack
+  corruption.
+
+- `None' is mapped to NULL for `execute' method inputs.
+  Previously, it was mapped to the literal string "None".
+
+- NULLS are mapped to `None' for `fetch{one|many|all}' method outputs.
+  Previously, they were mapped to either zero or an empty string.
+  (This fix can be disabled by setting the IFXDB_MASK_NULLS environment
+  variable to a non-zero value.  See ChangeLog for more info.)
+
+- Fixed error message formatting.
+
+- Potentially blocking SQL statements are now executed with the Python
+  interpreter lock released.  This permits other threads to execute
+  while one blocks on a database request.
+
+- Increased the maximum number of rows returned by the `fetchall'
+  method from 65536 to `sys.maxint'.
+
+- Fixed a bug that caused raw (i.e., BYTE or TEXT) inputs to
+  occasionally be treated as NULLs.
+
+- Fixed a bug that caused datetime outputs with YEAR TO MINUTE
+  precision to be wildly inaccurate.
+
+- Reorganized the source files as follows:
+
+  Release 1.0x     Release 1.2
+  ---------------  -----------------------
+                   README
+                   COPYRIGHT
+                   ChangeLog
+                   configure
+                   configure.in
+                   Makefile.in
+                   install-sh
+  informixdb.py    informixdb.py
+                   ext/
+                       Makefile.pre.in-1.4
+                       Setup.in
+  ifxdbmodule.ec       _informixdb.ec    
+  dbi.c                dbi.c          
+  dbi.h                dbi.h
+                   old/
+  README               README
+  Makefile             Makefile
+  _informixdb.mak      _informixdb.mak
+  _informixdb.def      _informixdb.def
+
+- Fixed numerous memory leaks.
+
+- Added support for thread-safe Informix, so that each thread can open its
+  own connections.
+
+- Implemented the "operation caching" feature of the `execute' method,
+  as described in the DB-API spec.  If the same operation string is
+  passed consecutively to `execute' (perhaps with different inputs
+  each time), informixdb now recognizes this condition and uses the
+  previously parsed/prepared/described SQL statement.
+
+For complete details, refer to the ChangeLog file included with this
+distribution.
+
+See also `old/README' for other NEWS.
+
+
+NOTES
+=====
+
+- If informixdb is built to use Informix shared libraries, you may
+  need to set LD_LIBRARY_PATH (or similar environment variable) so that
+  the runtime linker can locate these shared libraries.  Otherwise, you
+  may get the following exception when importing the informixdb module:
+
+    ImportError: Cannot locate C core module for informix db interface.
+
+- In the operation string argument of the `execute' method, informixdb
+  recognizes not only positional parameters (i.e., identified by '?'
+  characters) but also ordinal parameters (i.e., identified by ":N"
+  substrings, where N is a number from 1 to M corresponding to the Nth
+  item in the parameter M-tuple).
+
+- If you modify ext/_informixdb.ec, you'll either have to ./configure
+  again or run esql manually, since I couldn't find a good spot to have
+  distutils invoke esql.
+
+See also `old/README' for other NOTES.
+
+
+FUTURE
+======
+
+- Complete DB-API version 2.0 compliance.
+
+
+MAINTAINER
+==========
+
+Got questions and/or problems with informixdb?  Contact me at:
+  Carsten Haese <carstenh@sbcglobal.net>
+
+I'd recommend that you also consider CC'ing the Python DB-SIG at:
+  db-sig@python.org
+
+
+ACKNOWLEDGMENTS
+===============
+
+Many thanks to Greg Stein and Michael Lorton (late of the eShop) as
+the initial authors of informixdb, and to Bertil Reinhammar and Stephen
+Turner as its prior maintainers.
+
+
+RELEASE HISTORY
+===============
+
+Release  Date        By
+-------  ----------  -----------------
+1.0      1997-02-19  Bertil Reinhammar
+1.01     1997-02-19  Bertil Reinhammar
+1.2      1999-05-21  Stephen J. Turner
+1.3      1999-11-30  Stephen J. Turner
+1.4      2005-04-11  Carsten Haese
+
+--
+Carsten Haese <carstenh@sbcglobal.net>
+http://sourceforge.net/projects/informixdb

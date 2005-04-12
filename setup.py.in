@@ -1,0 +1,30 @@
+from distutils.core import setup, Extension
+from string import split
+esql_libs = "@ESQLLIBS@"
+esql_defs = "@ESQLDEFS@"
+
+extra_libs = []
+extra_objs = []
+extra_macros = [('STEP1',None), ('EXTENDED_ERROR_HANDLING',None)]
+
+for x in esql_libs.split(" "):
+  if x[0:2]=="-l": extra_libs.append(x[2:])
+  else: extra_objs.append(x)
+
+for x in esql_defs.split(" "):
+  if len(x)>0: extra_macros.append((x,None))
+
+module1 = Extension('_informixdb',
+                    sources = ['ext/_informixdb.c','ext/dbi.c'],
+                    include_dirs = ['ext','@INFORMIXDIR@/incl/esql'],
+                    library_dirs = ['@INFORMIXDIR@/lib',
+                                    '@INFORMIXDIR@/lib/esql'],
+                    define_macros = extra_macros,
+                    libraries = extra_libs,
+                    extra_objects = extra_objs)
+
+setup (name = 'InformixDB',
+       version = '1.4',
+       description = 'InformixDB v1.4',
+       py_modules = ['informixdb'],
+       ext_modules = [module1])

@@ -60,10 +60,9 @@
 
 static int ifxdbMaskNulls = 0;
 
-EXEC SQL include sqlda.h;
-
-
 static PyObject *ifxdbError;
+
+EXEC SQL include sqlda.h;
 
 /* NOT In USE: typedef PyObject * (* CopyFcn)(const void *); */
 
@@ -424,27 +423,23 @@ static void ifxdbPrintError(const char *action)
   char message2[255];
   int messlen1;
   int messlen2;
-  EXEC SQL END DECLARE SECTION;
-
-#ifdef EXTENDED_ERROR_HANDLING
-  EXEC SQL BEGIN DECLARE SECTION;
   int exc_cnt;
   char sqlstate_2[6];
   EXEC SQL END DECLARE SECTION;
-#endif /* EXTENDED_ERROR_HANDLING */
-
-#ifdef EXTENDED_ERROR_HANDLING
-  EXEC SQL get diagnostics :exc_cnt = NUMBER ;
-#endif /* EXTENDED_ERROR_HANDLING */
 
   EXEC SQL get diagnostics  exception 1
       :message1 = MESSAGE_TEXT, :messlen1 = MESSAGE_LENGTH;
 
 #ifdef EXTENDED_ERROR_HANDLING
+  EXEC SQL get diagnostics :exc_cnt = NUMBER ;
+
   if (exc_cnt > 1) {
     EXEC SQL get diagnostics  exception 2
-	:sqlstate_2 = RETURNED_SQLSTATE, :message2 = MESSAGE_TEXT, :messlen2 = MESSAGE_LENGTH;
+        :sqlstate_2 = RETURNED_SQLSTATE,
+        :message2 = MESSAGE_TEXT, :messlen2 = MESSAGE_LENGTH;
   }
+#else
+  exc_cnt = 1;
 #endif /* EXTENDED_ERROR_HANDLING */
 
   /* In some cases, message1 is null and messlen1 undefined... */
@@ -457,7 +452,6 @@ static void ifxdbPrintError(const char *action)
   } else
     strcpy(message1, "<NULL diagnostic message 1>");
 
-#ifdef EXTENDED_ERROR_HANDLING
   if (exc_cnt > 1) {
     /* In some cases, message2 is null and messlen2 undefined... */
     if ( messlen2 > 0 && messlen2 <= 255 ) {
@@ -469,25 +463,21 @@ static void ifxdbPrintError(const char *action)
     } else
       strcpy(message2, "<NULL diagnostic message 2>");
   }
-#endif /* EXTENDED_ERROR_HANDLING */
 
-#ifdef EXTENDED_ERROR_HANDLING
   if (exc_cnt > 1) {
       sprintf(message,
 	      "Error %d performing %s: %s (%s:%s)",
 	      SQLCODE, action, message1, sqlstate_2, message2);
+      PyErr_SetObject(ifxdbError, 
+          Py_BuildValue("(sissss)", message, SQLCODE, action, message1,
+                                sqlstate_2, message2));
   } else {
       sprintf(message,
 	      "Error %d performing %s: %s",
 	      SQLCODE, action, message1);
+      PyErr_SetObject(ifxdbError, 
+          Py_BuildValue("(siss)", message, SQLCODE, action, message1));
   }
-#else
-  sprintf(message,
-	  "Error %d performing %s: %s",
-	  SQLCODE, action, message1);
-#endif /* EXTENDED_ERROR_HANDLING */
-	  
-  PyErr_SetString(ifxdbError, message);
 }
 
 /* returns 0 on success, 1 on failure */
@@ -1399,6 +1389,65 @@ static PyMethodDef globalMethods[] = {
   {0,     0}        /* Sentinel */
 };
 
+static PyObject *InformixError__init__(PyObject *self, PyObject *args);
+static PyObject *InformixError__str__(PyObject *self, PyObject *args);
+static PyMethodDef
+InformixError_methods[] = {
+    { "__str__",    InformixError__str__, METH_VARARGS},
+    { "__init__",    InformixError__init__, METH_VARARGS},
+    { NULL, NULL }
+};
+
+static PyObject *InformixError__str__(PyObject *self, PyObject *args) {
+    self = PyTuple_GetItem(args, 0);
+    return PyObject_GetAttrString(self, "message");
+}
+
+static PyObject *InformixError__init__(PyObject *self, PyObject *args) {
+    int status;
+    PyObject *val;
+    int i,n;
+    char **attr_name;
+    char *attr_names[] = {
+      "message",
+      "sqlcode",
+      "action",
+      "message1",
+#ifdef EXTENDED_ERROR_HANDLING
+      "sqlstate",
+      "message2",
+#endif
+      NULL
+    };
+
+    self = PyTuple_GetItem(args, 0);
+
+    if (!(args = PySequence_GetSlice(args, 1, PySequence_Size(args))))
+        return NULL;
+
+    status = PyObject_SetAttrString(self, "args", args);
+    if (status < 0) {
+        Py_DECREF(args);
+        return NULL;
+    }
+
+    n = PySequence_Size(args);
+    for (i=0, attr_name=attr_names; *attr_name; attr_name++, i++) {
+      if (i>=n) break;
+      val = PySequence_GetItem(args, i);
+      status = PyObject_SetAttrString(self, *attr_name, val);
+      if (status < 0) {
+          Py_DECREF(val);
+          Py_DECREF(args);
+          return NULL;
+      }
+      Py_DECREF(val);
+    }
+
+    Py_DECREF(args);
+    Py_INCREF(Py_None);
+    return Py_None;
+}
 
 /* void initinformixdb() */
 void init_informixdb()
@@ -1406,6 +1455,9 @@ void init_informixdb()
   char *env;
   extern void initdbi();
   int threadsafety = 0;
+  PyObject *dict = PyDict_New();
+  PyMethodDef *def;
+
 #ifdef WIN32
   PyObject *m;
   Cursor_Type.ob_type = &PyType_Type;
@@ -1414,7 +1466,16 @@ void init_informixdb()
 #else
   PyObject *m = Py_InitModule("_informixdb", globalMethods);
 #endif
-  ifxdbError = PyErr_NewException("informixdb.Error", NULL, NULL);
+
+  ifxdbError = PyErr_NewException("informixdb.Error", NULL, dict);
+  for (def = InformixError_methods; def->ml_name != NULL; def++) {
+    PyObject *func = PyCFunction_New(def, NULL);
+    PyObject *method = PyMethod_New(func, NULL, ifxdbError);
+    PyDict_SetItemString(dict, def->ml_name, method);
+    Py_DECREF(func);
+    Py_DECREF(method);
+  }
+
   PyDict_SetItemString (PyModule_GetDict (m), "Error", ifxdbError);
 
 #ifdef IFX_THREAD

@@ -36,6 +36,7 @@
 # NYD = Not Yet Defined by DBAPI
 # NYI = Not Yet Implemented
 #
+
 try:
     import _informixdb
 except ImportError:
@@ -47,33 +48,18 @@ from _informixdb import threadsafety
 apilevel = "1.0"
 paramstyle = "numeric"
 
-class informixdb:
-    def __init__(self, logon, user="", passwd=""):
-	self.conn = _informixdb.informixdb(logon,user,passwd)
-	self._cursor = self.conn.cursor()
+class ifxcursor:
+    def __init__(self, conn): self._cursor = conn.cursor()
 
     def __getattr__(self, attr):
 	if attr == 'description':
 	    return self._cursor.description
 	elif attr == 'arraysize':
 	    return self._cursor.arraysize
-	elif attr == 'error':
-	    return _informixdb.Error
-	elif attr == 'Error':
-	    return _informixdb.Error
 	elif attr == 'sqlerrd':
 	    return self._cursor.sqlerrd
 	else:
 	    raise AttributeError, attr
-
-    def commit(self):
-	self.conn.commit()
-
-    def rollback(self):
-	self.conn.rollback()
-
-    def cursor(self):
-	return self.conn.cursor()
 
     def callproc(self, params = None):
 	pass # NYD
@@ -90,10 +76,70 @@ class informixdb:
     def fetchall(self):
 	return self._cursor.fetchall()
 
+    def next(self):
+        result = self.fetchone()
+        if result == None: raise StopIteration
+        return result
+
+    def __iter__(self): return self
+
     def close(self):
 	self._cursor.close()
-	self.conn.close()
 	self._cursor = None
+
+    def setinputsizes(self, sizes):
+	pass # NYD
+
+    def setoutputsizes(self, sizes, col = None):
+	pass # NYD
+
+class informixdb:
+    def __init__(self, logon, user="", passwd=""):
+	self.conn = _informixdb.informixdb(logon,user,passwd)
+	self._ifxcursor = ifxcursor(self.conn)
+
+    def __getattr__(self, attr):
+	if attr == 'description':
+	    return self._ifxcursor.description
+	elif attr == 'arraysize':
+	    return self._ifxcursor.arraysize
+	elif attr == 'error':
+	    return _informixdb.Error
+	elif attr == 'Error':
+	    return _informixdb.Error
+	elif attr == 'sqlerrd':
+	    return self._ifxcursor.sqlerrd
+	else:
+	    raise AttributeError, attr
+
+    def commit(self):
+	self.conn.commit()
+
+    def rollback(self):
+	self.conn.rollback()
+
+    def cursor(self):
+	return ifxcursor(self.conn)
+
+    def callproc(self, params = None):
+	pass # NYD
+
+    def execute(self, *args):
+	return apply(self._ifxcursor.execute, args)
+
+    def fetchone(self):
+	return self._ifxcursor.fetchone()
+
+    def fetchmany(self, size = None):
+	return self._ifxcursor.fetchmany(size)
+
+    def fetchall(self):
+	return self._ifxcursor.fetchall()
+
+    def close(self):
+	self._ifxcursor.close()
+	self.conn.close()
+	self._ifxcursor = None
 	self.conn = None
 
     def setinputsizes(self, sizes):

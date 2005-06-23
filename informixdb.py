@@ -49,13 +49,13 @@ apilevel = "1.0"
 paramstyle = "numeric"
 
 class ifxcursor:
-    def __init__(self, conn): self._cursor = conn.cursor()
+    def __init__(self, conn):
+        self._cursor = conn.cursor()
+        self.arraysize = 1
 
     def __getattr__(self, attr):
 	if attr == 'description':
 	    return self._cursor.description
-	elif attr == 'arraysize':
-	    return self._cursor.arraysize
 	elif attr == 'sqlerrd':
 	    return self._cursor.sqlerrd
 	else:
@@ -67,10 +67,14 @@ class ifxcursor:
     def execute(self, *args):
 	return apply(self._cursor.execute, args)
 
+    def executemany(self, oper, params):
+        for p in params: self.execute(oper, p)
+
     def fetchone(self):
 	return self._cursor.fetchone()
 
     def fetchmany(self, size = None):
+        if size==None: size = self.arraysize
 	return self._cursor.fetchmany(size)
 
     def fetchall(self):

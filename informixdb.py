@@ -58,6 +58,8 @@ class ifxcursor:
 	    return self._cursor.description
 	elif attr == 'sqlerrd':
 	    return self._cursor.sqlerrd
+	elif attr == 'rowcount':
+	    return self._cursor.rowcount
 	else:
 	    raise AttributeError, attr
 
@@ -98,8 +100,16 @@ class ifxcursor:
 	pass # NYD
 
 class informixdb:
-    def __init__(self, logon, user="", passwd=""):
-	self.conn = _informixdb.informixdb(logon,user,passwd)
+    def __init__(self, database=None, user=None, password=None):
+        if database==None:
+          raise TypeError, "No database name given."
+        if user != None and password == None:
+          raise TypeError, "Username but no password given."
+        if user == None and password != None:
+          raise TypeError, "Password but no username given."
+        if user == None: user = ""
+        if password == None: password = ""
+	self.conn = _informixdb.informixdb(database,user,password)
 	self._ifxcursor = ifxcursor(self.conn)
 
     def __getattr__(self, attr):
@@ -113,6 +123,8 @@ class informixdb:
 	    return _informixdb.Error
 	elif attr == 'sqlerrd':
 	    return self._ifxcursor.sqlerrd
+	elif attr == 'rowcount':
+	    return self._ifxcursor.rowcount
 	else:
 	    raise AttributeError, attr
 
@@ -152,5 +164,5 @@ class informixdb:
     def setoutputsizes(self, sizes, col = None):
 	pass # NYD
 
-def connect(*args):
-  return informixdb(*args)
+def connect(*args, **kwargs):
+  return informixdb(*args, **kwargs)

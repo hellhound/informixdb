@@ -109,6 +109,7 @@ typedef struct
   int stype; /* statement type */
   PyObject *op; /* last executed operation */
   long sqlerrd[6];
+  long rowcount;
 } cursorObject;
 
 /* pointer cast */
@@ -240,6 +241,8 @@ static PyObject *ifxdbCursor(PyObject *self, PyObject *args)
     cur->op = 0;
     sprintf(cur->cursorName, "CUR%lX", (unsigned long) cur);
     sprintf(cur->queryName, "QRY%lX", (unsigned long) cur);
+    memset(cur->sqlerrd, 0, sizeof(cur->sqlerrd));
+    cur->rowcount = -1;
   }
   return (PyObject*) cur;
 }
@@ -993,6 +996,12 @@ static PyObject *ifxdbCurGetSqlerrd(PyObject *self, PyObject *args)
     cur->sqlerrd[3], cur->sqlerrd[4], cur->sqlerrd[5]);
 }
 
+static PyObject *ifxdbCurGetRowcount(PyObject *self, PyObject *args)
+{
+  cursorObject *cur = cursor(self);
+  return Py_BuildValue("i", cur->rowcount);
+}
+
 static PyObject *ifxdbCurExec(PyObject *self, PyObject *args)
 {
   cursorObject *cur = cursor(self);
@@ -1032,6 +1041,7 @@ static PyObject *ifxdbCurExec(PyObject *self, PyObject *args)
       return 0;
     }
     EXEC SQL PREPARE :queryName FROM :newSql;
+    for (i=0; i<6; i++) cur->sqlerrd[i] = sqlca.sqlerrd[i];
     free(newSql);
     returnOnError("PREPARE");
     cur->state = 1;
@@ -1066,6 +1076,8 @@ static PyObject *ifxdbCurExec(PyObject *self, PyObject *args)
     returnOnError("OPEN");
     cur->state = 3;
 
+    for (i=0; i<6; i++) cur->sqlerrd[i] = sqlca.sqlerrd[i];
+    cur->rowcount = sqlca.sqlerrd[0]; /* ESTIMATED number of rows */
     Py_INCREF(Py_None);
     return Py_None;
   } else {
@@ -1076,6 +1088,7 @@ static PyObject *ifxdbCurExec(PyObject *self, PyObject *args)
       cursorError(cur, "EXEC");
     else {
       for (i=0; i<6; i++) cur->sqlerrd[i] = sqlca.sqlerrd[i];
+      cur->rowcount = sqlca.sqlerrd[2];
       return Py_BuildValue("i", sqlca.sqlerrd[2]); /* number of row */
     }
   }
@@ -1216,6 +1229,7 @@ static PyObject *ifxdbCurFetchOne(PyObject *self, PyObject *args)
 {
   cursorObject *cur = cursor(self);
   struct sqlda *tdaOut = cur->daOut;
+  int i;
 
   EXEC SQL BEGIN DECLARE SECTION;
   char *cursorName;
@@ -1230,6 +1244,7 @@ static PyObject *ifxdbCurFetchOne(PyObject *self, PyObject *args)
 
   Py_BEGIN_ALLOW_THREADS;
   EXEC SQL FETCH :cursorName USING DESCRIPTOR tdaOut;
+  for (i=0; i<6; i++) cur->sqlerrd[i] = sqlca.sqlerrd[i];
   Py_END_ALLOW_THREADS;
   if (!strncmp(SQLSTATE, "02", 2)) {
     Py_INCREF(Py_None);
@@ -1331,6 +1346,10 @@ static PyObject *cursorGetAttr(PyObject *self,
   if (!strcmp(name, "sqlerrd")) {
     Py_INCREF(Py_None);
     return ifxdbCurGetSqlerrd(self, Py_None);
+  }
+  if (!strcmp(name, "rowcount")) {
+    Py_INCREF(Py_None);
+    return ifxdbCurGetRowcount(self, Py_None);
   }
   return Py_FindMethod (cursorMethods, self, name);
 }

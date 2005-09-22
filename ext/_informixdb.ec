@@ -1155,6 +1155,7 @@ static PyObject *doCopy(/* const */ void *data, int type)
   case SQLVCHAR:
   case SQLNCHAR:
   case SQLNVCHAR:
+  case SQLLVARCHAR:
   {
       /* NOTE: we must axe trailing spaces in Informix (boggle) */
       register size_t len = strlen((char*)data);

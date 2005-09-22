@@ -1157,15 +1157,10 @@ static PyObject *doCopy(/* const */ void *data, int type)
   case SQLNVCHAR:
   case SQLLVARCHAR:
   {
-      /* NOTE: we must axe trailing spaces in Informix (boggle) */
+      /* clip trailing spaces */
       register size_t len = strlen((char*)data);
-      register char * p = (char*)data + len - 1;
-
-      while ( len > 1 && *p == ' ' )
-      {
-	  *p-- = '\0';
-	  --len;
-      }
+      register size_t clipped_len = byleng(data, len);
+      ((char*)data)[clipped_len] = 0;
       return Py_BuildValue("s", (char*)data);
   }
   case SQLFLOAT:

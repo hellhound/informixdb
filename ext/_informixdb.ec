@@ -43,6 +43,7 @@
 #endif
 
 #include <sqltypes.h>
+#include <sqlstype.h>
 #include <locator.h>
 #include <datetime.h>
 
@@ -1096,6 +1097,148 @@ static PyObject *ifxdbCurExec(PyObject *self, PyObject *args)
   return 0;
 }
 
+static PyObject *ifxdbCurExecMany(PyObject *self, PyObject *args)
+{
+  cursorObject *cur = cursor(self);
+  struct sqlda *tdaIn = &cur->daIn;
+  struct sqlda *tdaOut = cur->daOut;
+  PyObject *op;
+  const char *sql;
+  int i, len;
+  int rowcount = 0, inputDirty = 0, useInsertCursor;
+  EXEC SQL BEGIN DECLARE SECTION;
+  char *queryName = cur->queryName;
+  char *cursorName = cur->cursorName;
+  char *newSql;
+  EXEC SQL END DECLARE SECTION;
+  
+  PyObject *params, *inputvars = 0;
+  if (!PyArg_ParseTuple(args, "sO", &sql, &params))
+    return 0;
+  op = PyTuple_GET_ITEM(args, 0);
+  len = PySequence_Size(params);
+  if (len == -1) {
+    PyErr_SetString(PyExc_TypeError, "Parameter must be a sequence");
+    return NULL;
+  }
+
+  /* Make sure we talk to the right database. */
+  if (setConnection(connection(cur->my_conx))) return NULL;
+
+  if (op == cur->op) {
+    doCloseCursor(cur, 0);
+    cleanInputBinding(cur);
+  } else {
+    doCloseCursor(cur, 1);
+    deleteInputBinding(cur);
+    deleteOutputBinding(cur);
+
+    /* `newSql' may be shorter than but will never exceed length of `sql' */
+    newSql = malloc(strlen(sql) + 1);
+    if (!parseSql(cur, newSql, sql)) {
+      free(newSql);
+      return 0;
+    }
+    EXEC SQL PREPARE :queryName FROM :newSql;
+    for (i=0; i<6; i++) cur->sqlerrd[i] = sqlca.sqlerrd[i];
+    free(newSql);
+    returnOnError("PREPARE");
+    cur->state = 1;
+
+    EXEC SQL DESCRIBE :queryName INTO tdaOut;
+    cur->daOut = tdaOut;
+    cur->stype = SQLCODE;
+
+    if (cur->stype == 0) {
+      bindOutput(cur);
+
+      EXEC SQL DECLARE :cursorName CURSOR FOR :queryName;
+      returnOnError("DECLARE");
+      EXEC SQL FREE :queryName;
+      returnOnError("FREE");
+      cur->state = 2;
+    } else {
+      free(cur->daOut);
+      cur->daOut = NULL;
+    }
+
+    useInsertCursor =
+      (connection(cur->my_conx)->has_commit && cur->stype==SQ_INSERT);
+
+    if (useInsertCursor) {
+      EXEC SQL DECLARE :cursorName CURSOR FOR :queryName;
+      returnOnError("DECLARE");
+      EXEC SQL FREE :queryName;
+      returnOnError("FREE");
+      cur->state = 2;
+      EXEC SQL OPEN :cursorName;
+      returnOnError("OPEN");
+      cur->state = 3;
+    }
+
+    /* cache operation reference */
+    cur->op = op;
+    Py_INCREF(op);
+  }
+
+  for (i=0; i<len; i++) {
+    inputvars = PySequence_GetItem(params, i);
+    if (inputDirty) {
+      cleanInputBinding(cur);
+    }
+    if (!bindInput(cur, inputvars))
+      return 0;
+    inputDirty = 1;
+ 
+    if (cur->stype == 0) {
+      EXEC SQL OPEN :cursorName USING DESCRIPTOR tdaIn;
+      returnOnError("OPEN");
+      cur->state = 3;
+  
+      rowcount = -1;
+    } else {
+      Py_BEGIN_ALLOW_THREADS;
+      if (useInsertCursor) {
+        EXEC SQL PUT :cursorName USING DESCRIPTOR tdaIn;
+      }
+      else {
+        EXEC SQL EXECUTE :queryName USING DESCRIPTOR tdaIn;
+      }
+      Py_END_ALLOW_THREADS;
+      if (unsuccessful())
+        cursorError(cur, "EXEC");
+      else {
+        switch (cur->stype) {
+          case SQ_UPDATE:
+          case SQ_UPDCURR:
+          case SQ_UPDALL:
+          case SQ_DELETE:
+          case SQ_DELCURR:
+          case SQ_DELALL:
+          case SQ_INSERT:
+            rowcount += sqlca.sqlerrd[2];
+            break;
+          default:
+            rowcount = -1;
+            break;
+        }
+      }
+    }
+    Py_DECREF(inputvars);
+  }
+  if (useInsertCursor) {
+    Py_BEGIN_ALLOW_THREADS;
+    EXEC SQL FLUSH :cursorName;
+    Py_END_ALLOW_THREADS;
+    rowcount += sqlca.sqlerrd[2];
+  }
+  
+  cur->rowcount = rowcount;
+  for (i=0; i<6; i++) cur->sqlerrd[i] = sqlca.sqlerrd[i];
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+
 /* Routines for manipulations of datetime
 */
 static int convertToInt(dtime_t *d, const char *fmt)
@@ -1315,6 +1458,7 @@ static PyObject *ifxdbCurSetOutputSize(PyObject *self, PyObject *args)
 static PyMethodDef cursorMethods[] = {
   { "close", ifxdbCurClose, 1} ,
   { "execute", ifxdbCurExec, 1} ,
+  { "executemany", ifxdbCurExecMany, 1},
   { "fetchone", ifxdbCurFetchOne, 1} ,
   { "fetchmany", ifxdbCurFetchMany, 1} ,
   { "fetchall", ifxdbCurFetchAll, 1} ,

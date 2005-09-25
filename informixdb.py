@@ -69,8 +69,8 @@ class ifxcursor:
     def execute(self, *args):
         return apply(self._cursor.execute, args)
 
-    def executemany(self, oper, params):
-        for p in params: self.execute(oper, p)
+    def executemany(self, *args):
+        return apply(self._cursor.executemany, args)
 
     def fetchone(self):
         return self._cursor.fetchone()

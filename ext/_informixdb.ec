@@ -1,7 +1,7 @@
 /************************************************************************
- * 		  Copyright (c) 1997 by IV DocEye AB
- * 	       Copyright (c) 1999 by Stephen J. Turner
- * 	         Copyright (c) 1999 by Carsten Haese
+ *                Copyright (c) 1997 by IV DocEye AB
+ *             Copyright (c) 1999 by Stephen J. Turner
+ *               Copyright (c) 1999 by Carsten Haese
  *  
  * By obtaining, using, and/or copying this software and/or its
  * associated documentation, you agree that you have read, understood,
@@ -130,13 +130,13 @@ static void cleanInputBinding(cursorObject *cur)
     for (i=0; i<da->sqld; i++) {
       /* may not actually exist in some err cases */
       if ( da->sqlvar[i].sqldata) {
-	if (da->sqlvar[i].sqltype == CLOCATORTYPE) {
-	  loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
-	  if (loc->loc_buffer) {
-	    free(loc->loc_buffer);
-	  }
-	}
-	free(da->sqlvar[i].sqldata);
+        if (da->sqlvar[i].sqltype == CLOCATORTYPE) {
+          loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
+          if (loc->loc_buffer) {
+            free(loc->loc_buffer);
+          }
+        }
+        free(da->sqlvar[i].sqldata);
       }
     }
   }
@@ -167,10 +167,10 @@ static void deleteOutputBinding(cursorObject *cur)
     int i;
     for (i=0; i<da->sqld; i++)
       if (da->sqlvar[i].sqldata &&
-	  (da->sqlvar[i].sqltype == CLOCATORTYPE)) {
-	loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
-	if (loc->loc_buffer)
-	  free(loc->loc_buffer);
+          (da->sqlvar[i].sqltype == CLOCATORTYPE)) {
+        loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
+        if (loc->loc_buffer)
+          free(loc->loc_buffer);
       }
     free(cur->daOut);
     cur->daOut = 0;
@@ -204,13 +204,13 @@ static PyTypeObject Cursor_Type =
 #else
   PyObject_HEAD_INIT (&PyType_Type)
 #endif
-  0,			/*ob_size */
-  "ifxdbcur",		/*tp_name */
-  sizeof(cursorObject),	/*tp_basicsize */
-  0,			/*tp_itemsize */
-  cursorDealloc,	/*tp_dealloc */
-  0,			/*tp_print */
-  cursorGetAttr,	/*tp_getattr */
+  0,                    /*ob_size */
+  "ifxdbcur",           /*tp_name */
+  sizeof(cursorObject), /*tp_basicsize */
+  0,                    /*tp_itemsize */
+  cursorDealloc,        /*tp_dealloc */
+  0,                    /*tp_print */
+  cursorGetAttr,        /*tp_getattr */
   /* drop the rest */
 };
 
@@ -227,7 +227,7 @@ static PyObject *ifxdbCursor(PyObject *self, PyObject *args)
   cursorObject *cur = PyObject_NEW(cursorObject, &Cursor_Type);
   if (cur) {
     cur->description = 0;
-    cur->my_conx = self;	/* Reference to db object. */
+    cur->my_conx = self;        /* Reference to db object. */
     Py_INCREF(self); /* the cursors owns a reference to the connection */
     cur->state = 0;
     cur->daIn.sqld = 0; cur->daIn.sqlvar = 0;
@@ -265,11 +265,11 @@ static void doCloseCursor(cursorObject *cur, int doFree)
     if (doFree) { 
       /* if cursor is prepared but not declared, free the statement */
       if (cur->state == 1)
-	EXEC SQL FREE :queryName;
+        EXEC SQL FREE :queryName;
 
       /* if cursor is at least declared, free it */
       if (cur->state >= 2)
-	EXEC SQL FREE :cursorName;
+        EXEC SQL FREE :cursorName;
 
       cur->state = 0;
     }
@@ -330,13 +330,13 @@ static PyTypeObject Connection_Type =
 #else
   PyObject_HEAD_INIT (&PyType_Type)
 #endif
-  0,				/*ob_size */
-  "ifxdbconn",			/*tp_name */
-  sizeof (connectionObject),	/*tp_basicsize */
-  0,				/*tp_itemsize */
-  connectionDealloc,		/*tp_dealloc */
-  0,				/*tp_print */
-  connectionGetAttr,		/*tp_getattr */
+  0,                            /*ob_size */
+  "ifxdbconn",                  /*tp_name */
+  sizeof (connectionObject),    /*tp_basicsize */
+  0,                            /*tp_itemsize */
+  connectionDealloc,            /*tp_dealloc */
+  0,                            /*tp_print */
+  connectionGetAttr,            /*tp_getattr */
   /* drop the rest */
 };
 
@@ -461,7 +461,7 @@ static void ifxdbPrintError(const char *action)
       /* messlen2 value is often incorrect, so recalculate it */
       messlen2 = byleng(message2, 254) - 1;
       if (message2[messlen2] != '\n')
-	messlen2++;
+        messlen2++;
       message2[messlen2] = 0;
     } else
       strcpy(message2, "<NULL diagnostic message 2>");
@@ -469,15 +469,15 @@ static void ifxdbPrintError(const char *action)
 
   if (exc_cnt > 1) {
       sprintf(message,
-	      "Error %d performing %s: %s (%s:%s)",
-	      SQLCODE, action, message1, sqlstate_2, message2);
+              "Error %d performing %s: %s (%s:%s)",
+              SQLCODE, action, message1, sqlstate_2, message2);
       PyErr_SetObject(ifxdbError, 
           Py_BuildValue("(sissss)", message, SQLCODE, action, message1,
                                 sqlstate_2, message2));
   } else {
       sprintf(message,
-	      "Error %d performing %s: %s",
-	      SQLCODE, action, message1);
+              "Error %d performing %s: %s",
+              SQLCODE, action, message1);
       PyErr_SetObject(ifxdbError, 
           Py_BuildValue("(siss)", message, SQLCODE, action, message1));
   }
@@ -565,7 +565,7 @@ static PyMethodDef connectionMethods[] = {
 };
 
 static PyObject *connectionGetAttr(PyObject *self,
-			    char *name)
+                            char *name)
 {
   if (!strcmp(name, "Error")) {
     Py_INCREF(ifxdbError);
@@ -607,8 +607,8 @@ static PyObject *ifxdbCommit(PyObject *self, PyObject *args)
     else {
       EXEC SQL BEGIN WORK;
       if (unsuccessful()) {
-	connectionError(conn, "BEGIN");
-	return 0;
+        connectionError(conn, "BEGIN");
+        return 0;
       }
     }
   }
@@ -636,8 +636,8 @@ static PyObject *ifxdbRollback(PyObject *self, PyObject *args)
     else {
       EXEC SQL BEGIN WORK;
       if (unsuccessful()) {
-	connectionError(conn, "BEGIN");
-	return 0;
+        connectionError(conn, "BEGIN");
+        return 0;
       }
     }
   }
@@ -681,30 +681,30 @@ static int doParse(parseContext *ct)
       ct->state = 0;
     } else if (ct->state == 0){
       if ((ch == '\'') || (ch == '"')) {
-	ct->state = ch;
+        ct->state = ch;
       } else if (ch == '?') {
-	ct->parmIdx = ct->parmCount;
-	ct->parmCount++;
-	ct->isParm = 1;
-	rc = 1;
-	break;
+        ct->parmIdx = ct->parmCount;
+        ct->parmCount++;
+        ct->isParm = 1;
+        rc = 1;
+        break;
       } else if ((ch == ':') && !isalnum(ct->prev)) {
-	const char *m = in;
-	int n = 0;
-	while (isdigit(*m)) {
-	  n *= 10;
-	  n += *m - '0';
-	  m++;
-	}
-	if (n) {
-	  ct->parmIdx = n-1;
-	  ct->parmCount++;
-	  in = m;
-	  ct->isParm = 1;
-	  ct->prev = '0';
-	  rc = 1;
-	  break;
-	}
+        const char *m = in;
+        int n = 0;
+        while (isdigit(*m)) {
+          n *= 10;
+          n += *m - '0';
+          m++;
+        }
+        if (n) {
+          ct->parmIdx = n-1;
+          ct->parmCount++;
+          in = m;
+          ct->isParm = 1;
+          ct->prev = '0';
+          rc = 1;
+          break;
+        }
       }
     }
     ct->prev = *out++ = ch;
@@ -735,8 +735,8 @@ static int ibindRaw(struct sqlvar_struct *var, PyObject *item)
   loc->loc_mflags = 0;
   loc->loc_indicator = 0;
   memcpy(loc->loc_buffer,
-	 PyString_AS_STRING((PyStringObject*)sitem),
-	 n);
+         PyString_AS_STRING((PyStringObject*)sitem),
+         n);
     
   var->sqldata = (char *) loc;
   var->sqllen = sizeof(loc_t);
@@ -868,9 +868,9 @@ static int bindInput(cursorObject *cur, PyObject *vars)
       PyObject *item = PySequence_GetItem(vars, cur->parmIdx[i]);
 
       success = (*ibindFcn(item))(var++, item);
-      Py_DECREF(item);	/* PySequence_GetItem increments it */
+      Py_DECREF(item);  /* PySequence_GetItem increments it */
       if (!success)
-	return 0;
+        return 0;
     } else {
       PyErr_SetString(ifxdbError, " too few actual parameters");
       return 0;
@@ -916,11 +916,11 @@ static void bindOutput(cursorObject *cur)
        pos < cur->daOut->sqld;
        pos++, var++) {
     PyObject *new_tuple = Py_BuildValue("(sOiiiii)",
-					var->sqlname, 
-					typeOf(var->sqltype),
-					var->sqllen,
-					var->sqllen,
-					0, 0, !(var->sqltype & SQLNONULL));
+                                        var->sqlname, 
+                                        typeOf(var->sqltype),
+                                        var->sqllen,
+                                        var->sqllen,
+                                        0, 0, !(var->sqltype & SQLNONULL));
     PyTuple_SET_ITEM(cur->description, pos, new_tuple);
 
     var->sqlind = &cur->indOut[pos];
@@ -1125,12 +1125,12 @@ static time_t convertAscToUnix(const char *d)
   struct tm gt;
   memset(&gt, '\0', sizeof(gt));
   sscanf(d, "%04d-%02d-%02d %02d:%02d:%02d",
-	 &gt.tm_year,
-	 &gt.tm_mon,
-	 &gt.tm_mday,
-	 &gt.tm_hour,
-	 &gt.tm_min,
-	 &gt.tm_sec);
+         &gt.tm_year,
+         &gt.tm_mon,
+         &gt.tm_mday,
+         &gt.tm_hour,
+         &gt.tm_min,
+         &gt.tm_sec);
   gt.tm_year -= 1900;
   gt.tm_mon -= 1;
   gt.tm_isdst = -1;
@@ -1184,7 +1184,7 @@ static PyObject *doCopy(/* const */ void *data, int type)
     ((loc_t*)data)->loc_mflags |= LOC_ALLOC;
     return dbiMakeRaw
       (PyString_FromStringAndSize(((loc_t*)data)->loc_buffer,
-				  ((loc_t*)data)->loc_size));
+                                  ((loc_t*)data)->loc_size));
   }
   Py_INCREF(Py_None);
   return Py_None;
@@ -1263,20 +1263,20 @@ static PyObject *ifxdbFetchCounted(PyObject *self, int count)
 
       if ( entry == NULL )
       {
-	  Py_DECREF(list);
-	  return NULL;
+          Py_DECREF(list);
+          return NULL;
       }
       if ( entry == Py_None )
       {
-	  Py_DECREF(entry);
-	  break;
+          Py_DECREF(entry);
+          break;
       }
 
       if ( PyList_Append(list, entry) == -1 )
       {
-	  Py_DECREF(entry);
-	  Py_DECREF(list);
-	  return NULL;
+          Py_DECREF(entry);
+          Py_DECREF(list);
+          return NULL;
       }
 
       Py_DECREF(entry);
@@ -1324,7 +1324,7 @@ static PyMethodDef cursorMethods[] = {
 };
 
 static PyObject *cursorGetAttr(PyObject *self,
-			     char *name)
+                             char *name)
 {
   if (!strcmp(name, "description")) {
     if (cursor(self)->description) {
@@ -1376,19 +1376,19 @@ static PyObject *ifxdbLogon(PyObject *self, PyObject *args)
       Py_END_ALLOW_THREADS;
 
       if (unsuccessful()) {
-	connectionError(conn, "LOGON");
-	PyMem_DEL(conn);
-	conn = 0;
+        connectionError(conn, "LOGON");
+        PyMem_DEL(conn);
+        conn = 0;
       } else {
-	conn->has_commit = (sqlca.sqlwarn.sqlwarn1 == 'W') ;
-	if (conn->has_commit) {
-	  EXEC SQL BEGIN WORK;
-	  if (unsuccessful()) {
-	    connectionError(conn, "BEGIN");
-	    PyMem_DEL(conn);
-	    conn = 0;
-	  }
-	}
+        conn->has_commit = (sqlca.sqlwarn.sqlwarn1 == 'W') ;
+        if (conn->has_commit) {
+          EXEC SQL BEGIN WORK;
+          if (unsuccessful()) {
+            connectionError(conn, "BEGIN");
+            PyMem_DEL(conn);
+            conn = 0;
+          }
+        }
       }
     }
   }

@@ -1,7 +1,7 @@
 ########################################################################
-# 		  Copyright (c) 1997 by IV DocEye AB
-# 	       Copyright (c) 1999 by Stephen J. Turner
-# 	         Copyright (c) 2005 by Carsten Haese
+#                 Copyright (c) 1997 by IV DocEye AB
+#              Copyright (c) 1999 by Stephen J. Turner
+#                Copyright (c) 2005 by Carsten Haese
 #  
 # By obtaining, using, and/or copying this software and/or its
 # associated documentation, you agree that you have read, understood,
@@ -54,33 +54,33 @@ class ifxcursor:
         self.arraysize = 1
 
     def __getattr__(self, attr):
-	if attr == 'description':
-	    return self._cursor.description
-	elif attr == 'sqlerrd':
-	    return self._cursor.sqlerrd
-	elif attr == 'rowcount':
-	    return self._cursor.rowcount
-	else:
-	    raise AttributeError, attr
+        if attr == 'description':
+            return self._cursor.description
+        elif attr == 'sqlerrd':
+            return self._cursor.sqlerrd
+        elif attr == 'rowcount':
+            return self._cursor.rowcount
+        else:
+            raise AttributeError, attr
 
     def callproc(self, params = None):
-	pass # NYD
+        pass # NYD
 
     def execute(self, *args):
-	return apply(self._cursor.execute, args)
+        return apply(self._cursor.execute, args)
 
     def executemany(self, oper, params):
         for p in params: self.execute(oper, p)
 
     def fetchone(self):
-	return self._cursor.fetchone()
+        return self._cursor.fetchone()
 
     def fetchmany(self, size = None):
         if size==None: size = self.arraysize
-	return self._cursor.fetchmany(size)
+        return self._cursor.fetchmany(size)
 
     def fetchall(self):
-	return self._cursor.fetchall()
+        return self._cursor.fetchall()
 
     def next(self):
         result = self.fetchone()
@@ -90,14 +90,14 @@ class ifxcursor:
     def __iter__(self): return self
 
     def close(self):
-	self._cursor.close()
-	self._cursor = None
+        self._cursor.close()
+        self._cursor = None
 
     def setinputsizes(self, sizes):
-	pass # NYD
+        pass # NYD
 
     def setoutputsizes(self, sizes, col = None):
-	pass # NYD
+        pass # NYD
 
 class informixdb:
     def __init__(self, database=None, user=None, password=None):
@@ -109,60 +109,60 @@ class informixdb:
           raise TypeError, "Password but no username given."
         if user == None: user = ""
         if password == None: password = ""
-	self.conn = _informixdb.informixdb(database,user,password)
-	self._ifxcursor = ifxcursor(self.conn)
+        self.conn = _informixdb.informixdb(database,user,password)
+        self._ifxcursor = ifxcursor(self.conn)
 
     def __getattr__(self, attr):
-	if attr == 'description':
-	    return self._ifxcursor.description
-	elif attr == 'arraysize':
-	    return self._ifxcursor.arraysize
-	elif attr == 'error':
-	    return _informixdb.Error
-	elif attr == 'Error':
-	    return _informixdb.Error
-	elif attr == 'sqlerrd':
-	    return self._ifxcursor.sqlerrd
-	elif attr == 'rowcount':
-	    return self._ifxcursor.rowcount
-	else:
-	    raise AttributeError, attr
+        if attr == 'description':
+            return self._ifxcursor.description
+        elif attr == 'arraysize':
+            return self._ifxcursor.arraysize
+        elif attr == 'error':
+            return _informixdb.Error
+        elif attr == 'Error':
+            return _informixdb.Error
+        elif attr == 'sqlerrd':
+            return self._ifxcursor.sqlerrd
+        elif attr == 'rowcount':
+            return self._ifxcursor.rowcount
+        else:
+            raise AttributeError, attr
 
     def commit(self):
-	self.conn.commit()
+        self.conn.commit()
 
     def rollback(self):
-	self.conn.rollback()
+        self.conn.rollback()
 
     def cursor(self):
-	return ifxcursor(self.conn)
+        return ifxcursor(self.conn)
 
     def callproc(self, params = None):
-	pass # NYD
+        pass # NYD
 
     def execute(self, *args):
-	return apply(self._ifxcursor.execute, args)
+        return apply(self._ifxcursor.execute, args)
 
     def fetchone(self):
-	return self._ifxcursor.fetchone()
+        return self._ifxcursor.fetchone()
 
     def fetchmany(self, size = None):
-	return self._ifxcursor.fetchmany(size)
+        return self._ifxcursor.fetchmany(size)
 
     def fetchall(self):
-	return self._ifxcursor.fetchall()
+        return self._ifxcursor.fetchall()
 
     def close(self):
-	self._ifxcursor.close()
-	self.conn.close()
-	self._ifxcursor = None
-	self.conn = None
+        self._ifxcursor.close()
+        self.conn.close()
+        self._ifxcursor = None
+        self.conn = None
 
     def setinputsizes(self, sizes):
-	pass # NYD
+        pass # NYD
 
     def setoutputsizes(self, sizes, col = None):
-	pass # NYD
+        pass # NYD
 
 def connect(*args, **kwargs):
   return informixdb(*args, **kwargs)

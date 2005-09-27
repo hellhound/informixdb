@@ -1128,6 +1128,8 @@ static PyObject *ifxdbCurExecMany(PyObject *self, PyObject *args)
   if (op == cur->op) {
     doCloseCursor(cur, 0);
     cleanInputBinding(cur);
+    useInsertCursor =
+      (connection(cur->my_conx)->has_commit && cur->stype==SQ_INSERT);
   } else {
     doCloseCursor(cur, 1);
     deleteInputBinding(cur);
@@ -1171,14 +1173,17 @@ static PyObject *ifxdbCurExecMany(PyObject *self, PyObject *args)
       EXEC SQL FREE :queryName;
       returnOnError("FREE");
       cur->state = 2;
-      EXEC SQL OPEN :cursorName;
-      returnOnError("OPEN");
-      cur->state = 3;
     }
 
     /* cache operation reference */
     cur->op = op;
     Py_INCREF(op);
+  }
+
+  if (useInsertCursor) {
+    EXEC SQL OPEN :cursorName;
+    returnOnError("OPEN");
+    cur->state = 3;
   }
 
   for (i=0; i<len; i++) {

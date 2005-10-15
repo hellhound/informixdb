@@ -777,7 +777,7 @@ static int ibindString(struct sqlvar_struct *var, PyObject *item)
   int n = strlen(val);
   var->sqltype = CSTRINGTYPE;
   var->sqldata = malloc(n+1);
-  var->sqllen = n;
+  var->sqllen = n+1;
   *var->sqlind = 0;
   memcpy(var->sqldata, val, n+1);
   if (PyLong_Check(item)) {

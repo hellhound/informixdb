@@ -1,19 +1,16 @@
 INTRODUCTION
 ============
 
-This is informixdb 1.5, an Informix implementation of the Python
-Database API.  This release implements version 1.0 of the DB-API:
+This is informixdb 2.0, an Informix implementation of the Python
+Database API.  This release implements version 2.0 of the DB-API:
 
-  http://www.python.org/topics/database/DatabaseAPI-1.0.html
-
-Many useful features of version 2.0 of the DB-API are implemented as well,
-but the module is not fully compliant with version 2.0.
+  http://www.python.org/topics/database/DatabaseAPI-2.0.html
 
 The module consists of two components:
 
-- `informixdb', a Python module that implements the DB-API.
-- `_informixdb', a Python C extension used internally by `informixdb'
-  that interfaces with INFORMIX-ESQL/C.
+- `_informixdb', a Python C extension that interfaces with INFORMIX-ESQL/C
+  and implements the DB-API.
+- `informixdb', a very thin Python wrapper around _informixdb
 
 It is released under a BSD-like license.  See the COPYRIGHT file
 included with this distribution for more details.
@@ -22,16 +19,16 @@ included with this distribution for more details.
 INSTALLATION (UNIX)
 ===================
 
-This distribution uses GNU autoconf and Python distutils to build and install
-the informixdb module.  It should work with Python 1.5.2 or later as long as
-distutils is present.
+This distribution uses Python distutils to build and install the informixdb
+module.  It should work with Python 1.5.2 or later as long as distutils is
+present.
 
 
 In a hurry?
 -----------
 
 Extract the source distribution, and `cd' to the top-level directory.
-Type `./configure', `python setup.py build' and `python setup.py install'.
+Type `python setup.py build_ext' and, as root, `python setup.py install'.
 
 Or want the details?
 --------------------
@@ -39,47 +36,46 @@ Or want the details?
 First, extract the source distribution on a machine with Python 1.5.2 or
 later and INFORMIX-ESQL/C, and `cd' to the top-level directory.
 
-Next, run the configuration script `./configure', giving it any of the
+Next, run the build script `python setup.py build_ext', giving it any of the
 following build options:
 
-  --with-informix=DIR
+  --esql-informixdir=DIR
 
-  Look for INFORMIX-ESQL/C to be installed in `DIR'.  If omitted, it
-  defaults to the value of the INFORMIXDIR environment variable, or
-  else /usr/informix.
+  Look for INFORMIX-ESQL/C in `DIR'.  If omitted, it defaults to the value
+  of the INFORMIXDIR environment variable, or else /usr/informix.
 
-  --disable-shared
+  --esql-static
 
   Disable the use of Informix shared libraries.  The default is to use
   shared libraries if available.  With this option, you can require
   the Informix static libraries to instead be used.
 
-  --enable-thread=LIB
+  --esql-threadlib=LIB
 
   Enable the use of thread-safe Informix libraries, so that multiple Python
   threads can use informixdb concurrently.
 
-The configuration script looks for the first occurrence of `python' on
-the PATH to determine which version of Python to build against.  To
-name a different interpreter, set the PYTHON environment variable
-to its full path prior to running the script, as in:
-
-  $ PYTHON=/usr/local/bin/python2.2 ./configure
-
-You are now ready to type `python setup.py build'.  Assuming this works ;-),
-type `python setup.py install', which will install the package into the
-appropriate site-specific library path.
+If the build command completes without errors, type `python setup.py install',
+which will install the package into the appropriate site-specific library path.
 
 
 INSTALLATION (Win32)
 ====================
 
 I'm afraid you're on your own.  distutils should do the Right Thing, but
-I don't have a Windows box to try this.
+I haven't had the chance to try this yet. If you have had any success (or
+failure, for that matter) with building and installing InformixDB on Windows,
+I'd like to hear about it.
 
 
 NEWS
 ====
+
+From 1.5 to 2.0:
+
+- Full compliance with DB-API version 2
+- Implement LVARCHAR support
+- Use insert cursor, if possible, in executemany for improved performance.
 
 From 1.4 to 1.5:
 
@@ -197,17 +193,14 @@ NOTES
   substrings, where N is a number from 1 to M corresponding to the Nth
   item in the parameter M-tuple).
 
-- If you modify ext/_informixdb.ec, you'll either have to ./configure
-  again or run esql manually, since I couldn't find a good spot to have
-  distutils invoke esql.
-
 See also `old/README' for other NOTES.
 
 
 FUTURE
 ======
 
-- Complete DB-API version 2.0 compliance.
+- Implement useful optional DB-API extensions (e.g. error handler)
+- Work out Windows installation procedure
 
 
 MAINTAINER
@@ -227,6 +220,9 @@ Many thanks to Greg Stein and Michael Lorton (late of the eShop) as
 the initial authors of informixdb, and to Bertil Reinhammar and Stephen
 Turner as its prior maintainers.
 
+Special thanks to Daniel Smertnig for cleaning up the code, implementing
+API 2 compliance, and for integrating esql with distutils without the
+autoconf crutch.
 
 RELEASE HISTORY
 ===============
@@ -238,6 +234,7 @@ Release  Date        By
 1.2      1999-05-21  Stephen J. Turner
 1.3      1999-11-30  Stephen J. Turner
 1.4      2005-04-11  Carsten Haese
+2.0      TBD         Carsten Haese
 
 --
 Carsten Haese <carstenh@sbcglobal.net>

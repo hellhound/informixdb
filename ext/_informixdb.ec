@@ -2,11 +2,11 @@
  *                Copyright (c) 1997 by IV DocEye AB
  *             Copyright (c) 1999 by Stephen J. Turner
  *               Copyright (c) 1999 by Carsten Haese
- *  
+ *
  * By obtaining, using, and/or copying this software and/or its
  * associated documentation, you agree that you have read, understood,
  * and will comply with the following terms and conditions:
- *  
+ *
  * Permission to use, copy, modify, and distribute this software and its
  * associated documentation for any purpose and without fee is hereby
  * granted, provided that the above copyright notice appears in all
@@ -14,7 +14,7 @@
  * appear in supporting documentation, and that the name of the author
  * not be used in advertising or publicity pertaining to distribution of
  * the software without specific, written prior permission.
- *  
+ *
  * THE AUTHOR DISCLAIMS ALL WARRANTIES WITH REGARD TO THIS SOFTWARE,
  * INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS.  IN
  * NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, INDIRECT OR
@@ -25,12 +25,16 @@
  ***********************************************************************/
 
 /*
-  _informixdb.ec (formerly ifxdbmodule.ec)
-  $Id$  
-*/
+   _informixdb.ec (formerly ifxdbmodule.ec)
+   $Id$
+ */
+
+#include "Python.h"
+#include "structmember.h"
+#include "longobject.h"
+#include "cobject.h"
 
 #include <limits.h>
-#include <time.h>
 #define loc_t temp_loc_t
 #include <ctype.h>
 #undef loc_t
@@ -47,9 +51,18 @@
 #include <locator.h>
 #include <datetime.h>
 
-#include "Python.h"
-#include "longobject.h"
-#include "dbi.h"
+#if HAVE_C_DATETIME == 1
+  /* Python and Informix both have a datetime.h, the Informix header is
+   * included above because it comes first in the include path. We manually
+   * include the Python one here (needs a few preprocessor tricks...)
+   */
+#   define DATETIME_INCLUDE datetime.h
+#   define HACKYDT_INC2(f) #f
+#   define HACKYDT_INC(f) HACKYDT_INC2(f)
+#   include HACKYDT_INC(PYTHON_INCLUDE/DATETIME_INCLUDE)
+#else
+#   include "datetime-compat.h" /* emulate datetime API on older versions */
+#endif
 
 #ifdef IFX_THREAD
 #ifndef WITH_THREAD
@@ -59,47 +72,84 @@
 #endif
 #endif
 
-static int ifxdbMaskNulls = 0;
-
-static PyObject *ifxdbError;
+/* Python.h defines these in Python >= 2.3 */
+#ifndef PyDoc_STR
+#define PyDoc_VAR(name)         static char name[]
+#define PyDoc_STR(str)          (str)
+#define PyDoc_STRVAR(name, str) PyDoc_VAR(name) = PyDoc_STR(str)
+#endif
 
 EXEC SQL include sqlda.h;
 
-/* NOT In USE: typedef PyObject * (* CopyFcn)(const void *); */
+/* This seems to be the preferred way nowadays to mark up slots which
+ * can't use static initializers.
+ */
+#define DEFERRED_ADDRESS(ADDR) 0
 
-/* Define and handle connection object
-*/
-typedef struct
+/************************* Error handling *************************/
+
+static PyObject *ExcWarning;
+static PyObject *ExcError;
+static PyObject *ExcInterfaceError;
+static PyObject *ExcDatabaseError;
+static PyObject *ExcInternalError;
+static PyObject *ExcOperationalError;
+static PyObject *ExcProgrammingError;
+static PyObject *ExcIntegrityError;
+static PyObject *ExcDataError;
+static PyObject *ExcNotSupportedError;
+
+/* Checks for occurance of database errors and handles them.
+ * Evaluates to 1 to indicate that an exception was raised, or to 0
+ * otherwise
+ */
+#define is_dberror(conn, cursor, action) \
+          (SQLSTATE[0] != '0' || (SQLSTATE[1] != '0' && SQLSTATE[1] != 2)) && \
+          error_handle(conn, cursor, dberror_type(NULL), dberror_value(action))
+
+#define clear_messages(obj) \
+          PySequence_DelSlice(obj->messages, 0, \
+                              PySequence_Length(obj->messages));
+
+/* Checks & handles database errors and returns NULL from the current
+ * function if an exception was raised.
+ */
+#define ret_on_dberror(conn, cursor, action) \
+          if (is_dberror(conn, cursor, action)) return NULL;
+
+#define ret_on_dberror_cursor(curs, action) \
+          ret_on_dberror(curs->conn, curs, action)
+
+#define require_open(conn) \
+          if (!conn || !conn->is_open) { \
+            if (error_handle(conn, NULL, ExcInterfaceError, \
+                PyString_FromString("Connection already closed"))) \
+              return NULL; \
+          }
+
+#define require_cursor_open(cursor) \
+          do { \
+            require_open(cursor->conn); \
+            if (!cursor || cursor->state == 4) { \
+              if (error_handle(cursor->conn, cursor, \
+                           ExcInterfaceError, \
+                           PyString_FromString("Cursor already closed"))) \
+                return NULL; \
+            }\
+          } while(0)
+
+/************************* Cursors *************************/
+
+enum CURSOR_ROWFORMAT { CURSOR_ROWFORMAT_TUPLE, CURSOR_ROWFORMAT_DICT };
+
+typedef struct Cursor_t
 {
   PyObject_HEAD
-  char name[20];
-  int has_commit;
-} connectionObject;
-
-/* pointer cast */
-static connectionObject *connection(PyObject *o)
-{
- return  (connectionObject *) o;
-}
-/* forget the function; use a macro instead */
-#define connection(o) ((connectionObject*)(o))
-
-/* === */
-
-static int setConnection(connectionObject*);
-static void ifxdbPrintError(const char *);
-static int sqlCheck(const char *);
-
-/* Define and handle cursor object
-*/
-typedef struct
-{
-  PyObject_HEAD
-  PyObject *my_conx;
-  PyObject *description;  
+  struct Connection_t *conn;
+  PyObject *description;
   int state; /* 0=free, 1=prepared, 2=declared, 3=opened, 4=closed */
-  char cursorName[20];
-  char queryName[20];
+  char* cursorName;
+  char queryName[30];
   struct sqlda daIn;
   struct sqlda *daOut;
   int *originalType;
@@ -111,242 +161,304 @@ typedef struct
   PyObject *op; /* last executed operation */
   long sqlerrd[6];
   long rowcount;
-} cursorObject;
+  int arraysize;
+  int rowformat;
+  PyObject *messages;
+  PyObject *errorhandler;
+} Cursor;
 
-/* pointer cast */
-static cursorObject *cursor(PyObject *o)
-{
- return  (cursorObject *) o;
-}
-/* forget the function; use a macro instead */
-#define cursor(o) ((cursorObject*)(o))
+static int Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs);
+static void Cursor_dealloc(Cursor *self);
+static PyObject* Cursor_close(Cursor *self);
+static PyObject* Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds);
+static PyObject* Cursor_executemany(Cursor *self, PyObject *args, PyObject *kwds);
+static PyObject* Cursor_fetchone(Cursor *self);
+static PyObject* Cursor_fetchmany(Cursor *self, PyObject *args, PyObject *kwds);
+static PyObject* Cursor_fetchall(Cursor *self);
+static PyObject* Cursor_setinputsizes(Cursor *self, PyObject *args, PyObject *kwds);
+static PyObject* Cursor_setoutputsize(Cursor *self, PyObject *args, PyObject *kwds);
+static PyObject* Cursor_callproc(Cursor *self, PyObject *args, PyObject *kwds);
+static PyObject* Cursor_iter(Cursor *self);
+static PyObject* Cursor_iternext(Cursor *self);
+static PyObject *Cursor_getsqlerrd(Cursor *self, void *closure);
 
-/* === */
-
-static void cleanInputBinding(cursorObject *cur)
-{
-  struct sqlda *da = &cur->daIn;
-  if (da->sqlvar) {
-    int i;
-    for (i=0; i<da->sqld; i++) {
-      /* may not actually exist in some err cases */
-      if ( da->sqlvar[i].sqldata) {
-        if (da->sqlvar[i].sqltype == CLOCATORTYPE) {
-          loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
-          if (loc->loc_buffer) {
-            free(loc->loc_buffer);
-          }
-        }
-        free(da->sqlvar[i].sqldata);
-      }
-    }
-  }
-}
-
-static void deleteInputBinding(cursorObject *cur)
-{
-  cleanInputBinding(cur);
-  if (cur->daIn.sqlvar) {
-    free(cur->daIn.sqlvar);
-    cur->daIn.sqlvar = 0;
-    cur->daIn.sqld = 0;
-  }
-  if (cur->indIn) {
-    free(cur->indIn);
-    cur->indIn = 0;
-  }
-  if (cur->parmIdx) {
-    free(cur->parmIdx);
-    cur->parmIdx = 0;
-  }
-}
-
-static void deleteOutputBinding(cursorObject *cur)
-{
-  struct sqlda *da = cur->daOut;
-  if (da && da->sqlvar) {
-    int i;
-    for (i=0; i<da->sqld; i++)
-      if (da->sqlvar[i].sqldata &&
-          (da->sqlvar[i].sqltype == CLOCATORTYPE)) {
-        loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
-        if (loc->loc_buffer)
-          free(loc->loc_buffer);
-      }
-    free(cur->daOut);
-    cur->daOut = 0;
-  }
-  if (cur->indOut) {
-    free(cur->indOut);
-    cur->indOut = 0;
-  }
-  if (cur->originalType) {
-    free(cur->originalType);
-    cur->originalType = 0;
-  }
-  if (cur->outputBuffer) {
-    free(cur->outputBuffer);
-    cur->outputBuffer = 0;
-  }
-
-  Py_XDECREF(cur->description);
-  cur->description = NULL;
-}
-
-/* Datastructure and methods for cursors.
-*/
-static void cursorDealloc(PyObject *self);
-static PyObject * cursorGetAttr(PyObject *self, char *name);
-
-static PyTypeObject Cursor_Type =
-{
-#ifdef WIN32 /* Whacky MS Compiler refuse to resolve. */
-  PyObject_HEAD_INIT (0)
-#else
-  PyObject_HEAD_INIT (&PyType_Type)
-#endif
-  0,                    /*ob_size */
-  "ifxdbcur",           /*tp_name */
-  sizeof(cursorObject), /*tp_basicsize */
-  0,                    /*tp_itemsize */
-  cursorDealloc,        /*tp_dealloc */
-  0,                    /*tp_print */
-  cursorGetAttr,        /*tp_getattr */
-  /* drop the rest */
+static PyMethodDef Cursor_methods[] = {
+  { "close", (PyCFunction)Cursor_close, METH_NOARGS},
+  { "execute", (PyCFunction)Cursor_execute, METH_VARARGS|METH_KEYWORDS},
+  { "executemany", (PyCFunction)Cursor_executemany, METH_VARARGS|METH_KEYWORDS},
+  { "fetchone", (PyCFunction)Cursor_fetchone, METH_NOARGS},
+  { "fetchmany", (PyCFunction)Cursor_fetchmany, METH_VARARGS|METH_KEYWORDS},
+  { "fetchall", (PyCFunction)Cursor_fetchall, METH_NOARGS},
+  { "setinputsizes", (PyCFunction)Cursor_setinputsizes, METH_VARARGS|METH_KEYWORDS},
+  { "setoutputsize", (PyCFunction)Cursor_setoutputsize, METH_VARARGS|METH_KEYWORDS},
+  { "callproc", (PyCFunction)Cursor_callproc, METH_VARARGS|METH_KEYWORDS},
+  { NULL }
 };
 
-static void cursorError(cursorObject *cur, const char *action)
-{
-  ifxdbPrintError(action);
-}
-
-static char
-ifxdbCursorDoc[] =  "Create a new cursor object and associate it with db object";
-
-static PyObject *ifxdbCursor(PyObject *self, PyObject *args)
-{
-  cursorObject *cur = PyObject_NEW(cursorObject, &Cursor_Type);
-  if (cur) {
-    cur->description = 0;
-    cur->my_conx = self;        /* Reference to db object. */
-    Py_INCREF(self); /* the cursors owns a reference to the connection */
-    cur->state = 0;
-    cur->daIn.sqld = 0; cur->daIn.sqlvar = 0;
-    cur->daOut = 0;
-    cur->originalType = 0;
-    cur->outputBuffer = 0;
-    cur->indIn = 0;
-    cur->indOut = 0;
-    cur->parmIdx = 0;
-    cur->stype = -1;
-    cur->op = 0;
-    sprintf(cur->cursorName, "CUR%lX", (unsigned long) cur);
-    sprintf(cur->queryName, "QRY%lX", (unsigned long) cur);
-    memset(cur->sqlerrd, 0, sizeof(cur->sqlerrd));
-    cur->rowcount = -1;
-  }
-  return (PyObject*) cur;
-}
-
-/* XXX assumes that caller has already called setConnection */
-static void doCloseCursor(cursorObject *cur, int doFree)
-{
-  EXEC SQL BEGIN DECLARE SECTION;
-  char *cursorName = cur->cursorName;
-  char *queryName = cur->queryName;
-  EXEC SQL END DECLARE SECTION;
-
-  if (cur->stype == 0) {
-    /* if cursor is opened, close it */
-    if (cur->state == 4) {
-      EXEC SQL CLOSE :cursorName;
-      cur->state = 5;
-    }
-
-    if (doFree) { 
-      /* if cursor is prepared but not declared, free the statement */
-      if (cur->state == 1)
-        EXEC SQL FREE :queryName;
-
-      /* if cursor is at least declared, free it */
-      if (cur->state >= 2)
-        EXEC SQL FREE :cursorName;
-
-      cur->state = 0;
-    }
-  } else {
-    if (doFree && cur->state == 1) {
-      /* if statement is prepared, free it */
-      EXEC SQL FREE :queryName;
-      cur->state = 0;
-    }
-  }
-}
-
-static void cursorDealloc(PyObject *self)
-{
-  cursorObject *cur = cursor(self);
-
-#ifdef STEP1
-  /* Make sure we talk to the right database. */
-  if (setConnection(connection(cur->my_conx)))
-    PyErr_Clear();
-#endif
-
-  doCloseCursor(cur, 1);
-  deleteInputBinding(cur);
-  deleteOutputBinding(cur);
-
-  Py_DECREF(cur->my_conx);
-  PyMem_DEL(self);
-}
-
-
-static PyObject *ifxdbCurClose(PyObject *self, PyObject *args)
-{
-#ifdef STEP1
-  /* Make sure we talk to the right database. */
-  if (setConnection(connection(cursor(self)->my_conx))) return NULL;
-#endif
-
-  /* per the spec, the cursor should not be useable after calling `close',
-   * so go ahead and free the cursor */
-  doCloseCursor(cursor(self), 1);
-
-  Py_INCREF(Py_None);
-  return Py_None;
-}
-
-/* End cursors === */
-
-/* Datastructure and methods for connections.
-*/
-static void connectionDealloc(PyObject *self);
-static PyObject * connectionGetAttr(PyObject *self, char *name);
-
-static PyTypeObject Connection_Type =
-{
-#ifdef WIN32 /* Whacky MS Compiler refuse to resolve. */
-  PyObject_HEAD_INIT (0)
-#else
-  PyObject_HEAD_INIT (&PyType_Type)
-#endif
-  0,                            /*ob_size */
-  "ifxdbconn",                  /*tp_name */
-  sizeof (connectionObject),    /*tp_basicsize */
-  0,                            /*tp_itemsize */
-  connectionDealloc,            /*tp_dealloc */
-  0,                            /*tp_print */
-  connectionGetAttr,            /*tp_getattr */
-  /* drop the rest */
+static PyMemberDef Cursor_members[] = {
+  { "description", T_OBJECT_EX, offsetof(Cursor, description), READONLY,
+    "Information about result columns." },
+  { "rowcount", T_LONG, offsetof(Cursor, rowcount), READONLY,
+    "Number of rows returned/manipulated by last statement or -1." },
+  { "arraysize", T_INT, offsetof(Cursor, arraysize), 0,
+    "Number of rows to fetch in fetchmany." },
+  { "messages", T_OBJECT_EX, offsetof(Cursor, messages), READONLY,
+    "List of SQL warning and error messages." },
+  { "errorhandler", T_OBJECT_EX, offsetof(Cursor, errorhandler), 0,
+    "Python callable which is invoked for SQL errors." },
+  { "connection", T_OBJECT_EX, offsetof(Cursor, conn), 0,
+    "Database connection associated with this cursor." },
+  { NULL }
 };
 
-static void connectionError(connectionObject *conn, const char *action)
+static PyGetSetDef Cursor_getseters[] = {
+  { "sqlerrd", (getter)Cursor_getsqlerrd, NULL,
+    "SQL error descriptor as tuple", NULL },
+  { NULL }
+};
+
+static char Cursor_doc[] =
+"Executes SQL statements and fetches their results";
+
+static PyTypeObject Cursor_type = {
+  PyObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type))
+  0,                                  /* ob_size*/
+  "_informixdb.Cursor",               /* tp_name */
+  sizeof(Cursor),                     /* tp_basicsize */
+  0,                                  /* tp_itemsize */
+  (destructor)Cursor_dealloc,         /* tp_dealloc */
+  0,                                  /* tp_print */
+  0,                                  /* tp_getattr */
+  0,                                  /* tp_setattr */
+  0,                                  /* tp_compare */
+  0,                                  /* tp_repr */
+  0,                                  /* tp_as_number */
+  0,                                  /* tp_as_sequence */
+  0,                                  /* tp_as_mapping */
+  0,                                  /* tp_hash */
+  0,                                  /* tp_call */
+  0,                                  /* tp_str */
+  0,                                  /* tp_getattro */
+  0,                                  /* tp_setattro */
+  0,                                  /* tp_as_buffer */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
+  Cursor_doc,                         /* tp_doc */
+  0,                                  /* tp_traverse */
+  0,                                  /* tp_clear */
+  0,                                  /* tp_richcompare */
+  0,                                  /* tp_weaklistoffset */
+  (getiterfunc)Cursor_iter,           /* tp_iter */
+  (iternextfunc)Cursor_iternext,      /* tp_iternext */
+  Cursor_methods,                     /* tp_methods */
+  Cursor_members,                     /* tp_members */
+  Cursor_getseters,                   /* tp_getset */
+  0,                                  /* tp_base */
+  0,                                  /* tp_dict */
+  0,                                  /* tp_descr_get */
+  0,                                  /* tp_descr_set */
+  0,                                  /* tp_dictoffset */
+  (initproc)Cursor_init,              /* tp_init */
+  PyType_GenericAlloc,                /* tp_alloc */
+  PyType_GenericNew,                  /* tp_new */
+  _PyObject_Del                       /* tp_free */
+};
+
+static void doCloseCursor(Cursor *cur, int doFree);
+static void cleanInputBinding(Cursor *cur);
+static void deleteInputBinding(Cursor *cur);
+static void deleteOutputBinding(Cursor *cur);
+
+/************************* Connections *************************/
+
+typedef struct Connection_t
 {
-  ifxdbPrintError(action);
+  PyObject_HEAD
+  char name[30];
+  int has_commit;
+  int is_open;
+  PyObject *messages;
+  PyObject *errorhandler;
+} Connection;
+
+static int setConnection(Connection*);
+
+static int Connection_init(Connection *self, PyObject *args, PyObject* kwds);
+static void Connection_dealloc(Connection *self);
+static PyObject *Connection_cursor(Connection *self, PyObject *args, PyObject *kwds);
+static PyObject *Connection_commit(Connection *self);
+static PyObject *Connection_rollback(Connection *self);
+static PyObject *Connection_close(Connection *self);
+
+PyDoc_STRVAR(Connection_cursor_doc,
+"cursor([name],[rowformat=informixdb.ROW_AS_TUPLE]) -> `Cursor`\n\n\
+Return a new `Cursor` object using the connection.\n\
+\n\
+`name` is an extension to the DB-API 2.0 specification and allows you to\n\
+optionally name your cursor. This is only useful when the cursor is going\n\
+to be used in 'WHERE CURRENT OF <name>' clauses in SQL statements.\n\
+Note however, that you will have to use a second `Cursor` object to perform\n\
+the operation, since trying to execute the '... WHERE CURRENT OF ...' statement\n\
+with the named `Cursor` object itself will close it.\n\
+\n\
+`rowformat` is an extension to the DB-API 2.0 specification that can be used\n\
+to specify that dictionaries with the column names as keys should be used as\n\
+return values of `fetchone`, `fetchmany` and `fetchall` instead of tuples.\n\
+To select this behaviour use `informixdb.ROW_AS_DICT` for `row_format`, e.g.:\n\
+\n\
+>>> cursor = conn.cursor(rowformat=informixdb.ROW_AS_DICT)\n\
+>>> cursor.execute('SELECT * FROM names')\n\
+>>> cursor.fetchall()\n\
+[{'age': 34, 'last': 'duck', 'first': 'donald'},\n\
+ {'age': 23, 'last': 'mouse', 'first': 'mickey'}]");
+
+PyDoc_STRVAR(Connection_commit_doc,
+"commit()\n\n\
+Commit the current database transaction and start a new one\n\n\
+`commit` does nothing for databases which have transactions disabled.");
+
+PyDoc_STRVAR(Connection_rollback_doc,
+"rollback()\n\n\
+Rollback the current database transaction and start a new one\n\n\
+`rollback` raises a NotSupportedError for databases which have transactions\n\
+disabled");
+
+PyDoc_STRVAR(Connection_close_doc,
+"close()\n\n\
+Close the connection and all associated `Cursor` objects\n\n\
+This is automatically when the `Connection` object and all its associated\n\
+cursors are destroyed.\n\n\
+After the connection is closed it becomes unusable and all operations on it\n\
+or its associated `Cursor` objects will raise an InterfaceError.\n\n\
+For databases which have transactions enabled an implicit rollback is\n\
+performed before the closing the connection, so be sure to commit any\n\
+outstanding operations before closing a `Connection`.");
+
+static PyMethodDef Connection_methods[] = {
+  { "cursor", (PyCFunction)Connection_cursor, METH_VARARGS|METH_KEYWORDS,
+    Connection_cursor_doc },
+  { "commit", (PyCFunction)Connection_commit, METH_NOARGS,
+    Connection_commit_doc },
+  { "rollback", (PyCFunction)Connection_rollback, METH_NOARGS,
+    Connection_rollback_doc },
+  { "close", (PyCFunction)Connection_close, METH_NOARGS,
+    Connection_close_doc },
+  { NULL }
+};
+
+PyDoc_STRVAR(Connection_messages_doc,
+"A list with one (exception_class, exception_values) tuple for each error/warning\n\n\
+The default `errorhandler` appends any warnings or errors concerning the\n\
+connection to this list. The list is automatically cleared by all connection\n\
+methods and can be manually cleared by the user with 'del connection.messages[:]'.\n\n\
+The purpose of these list is to eliminate the need to raise Warning exceptions.\n\n\
+Note that this is an extension to the DB API 2.0 specification.");
+
+PyDoc_STRVAR(Connection_errorhandler_doc,
+"An optional callable which can be used to customize error reporting\n\n\
+`errorhandler` can be set to a callable of the form\n\
+errorhandler(connection, cursor, errorclass, errorvalue) and will be\n\
+called for any errors or warnings concerning the connection.\n\n\
+The default (if errorhandler is None) is to append the error/warning to the\n\
+`messages` list and raise an exception unless the errorclass is `Warning`.\n\n\
+Note that this is an extension to the DB-API 2.0 specification.");
+
+static PyMemberDef Connection_members[] = {
+  { "messages", T_OBJECT_EX, offsetof(Connection, messages), READONLY,
+    Connection_messages_doc },
+  { "errorhandler", T_OBJECT_EX, offsetof(Connection, errorhandler), 0,
+    Connection_errorhandler_doc },
+  { NULL }
+};
+
+static PyObject *Connection_getexception(PyObject* self, PyObject* exc)
+{
+  Py_INCREF(exc);
+  return exc;
 }
-/* forget the function; use a macro instead */
-#define connectionError(conn, action) (ifxdbPrintError(action))
+
+static PyGetSetDef Connection_getseters[] = {
+  { "Warning", (getter)Connection_getexception, NULL,
+    NULL, DEFERRED_ADDRESS(ExcWarning) },
+  { "Error", (getter)Connection_getexception, NULL,
+    NULL, DEFERRED_ADDRESS(ExcError) },
+  { "InterfaceError", (getter)Connection_getexception, NULL,
+    NULL, DEFERRED_ADDRESS(ExcInterfaceError) },
+  { "DatabaseError", (getter)Connection_getexception, NULL,
+    NULL, DEFERRED_ADDRESS(ExcDatabaseError) },
+  { "InternalError", (getter)Connection_getexception, NULL,
+    NULL, DEFERRED_ADDRESS(ExcInternalError) },
+  { "OperationalError", (getter)Connection_getexception, NULL,
+    NULL, DEFERRED_ADDRESS(ExcOperationalError) },
+  { "ProgrammingError", (getter)Connection_getexception, NULL,
+    NULL, DEFERRED_ADDRESS(ExcProgrammingError) },
+  { "IntegrityError", (getter)Connection_getexception, NULL,
+    NULL, DEFERRED_ADDRESS(ExcIntegrityError) },
+  { "DataError", (getter)Connection_getexception, NULL,
+    NULL, DEFERRED_ADDRESS(ExcDataError) },
+  { "NotSupportedError", (getter)Connection_getexception, NULL,
+    NULL, DEFERRED_ADDRESS(ExcNotSupportedError) },
+  { NULL }
+};
+
+PyDoc_STRVAR(Connection_doc,
+"Connection to an Informix database\n\n\
+Provides access to transactions and allows the creation of Cursor objects\n\
+via the `cursor` method.\n\n\
+As an extension to the DB-API 2.0 specification Informix DB provides the\n\
+exception classes as attributes of `Connection` objects in addition to the\n\
+module level attributes to simplify error handling in multi-connection\n\
+environments.\n\n\
+Note: You should never directly instantiate a `Connection` object, use the\n\
+modules' `connect` method instead.");
+
+static PyTypeObject Connection_type = {
+  PyObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type))
+  0,                                  /* ob_size*/
+  "_informixdb.Connection",           /* tp_name */
+  sizeof(Connection),                 /* tp_basicsize */
+  0,                                  /* tp_itemsize */
+  (destructor)Connection_dealloc,     /* tp_dealloc */
+  0,                                  /* tp_print */
+  0,                                  /* tp_getattr */
+  0,                                  /* tp_setattr */
+  0,                                  /* tp_compare */
+  0,                                  /* tp_repr */
+  0,                                  /* tp_as_number */
+  0,                                  /* tp_as_sequence */
+  0,                                  /* tp_as_mapping */
+  0,                                  /* tp_hash */
+  0,                                  /* tp_call */
+  0,                                  /* tp_str */
+  0,                                  /* tp_getattro */
+  0,                                  /* tp_setattro */
+  0,                                  /* tp_as_buffer */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
+  Connection_doc,                     /* tp_doc */
+  0,                                  /* tp_traverse */
+  0,                                  /* tp_clear */
+  0,                                  /* tp_richcompare */
+  0,                                  /* tp_weaklistoffset */
+  0,                                  /* tp_iter */
+  0,                                  /* tp_iternext */
+  Connection_methods,                 /* tp_methods */
+  Connection_members,                 /* tp_members */
+  Connection_getseters,               /* tp_getset */
+  0,                                  /* tp_base */
+  0,                                  /* tp_dict */
+  0,                                  /* tp_descr_get */
+  0,                                  /* tp_descr_set */
+  0,                                  /* tp_dictoffset */
+  (initproc)Connection_init,          /* tp_init */
+  PyType_GenericAlloc,                /* tp_alloc */
+  PyType_GenericNew,                  /* tp_new */
+  _PyObject_Del                       /* tp_free */
+};
+
+static PyObject *dberror_type(PyObject *override);
+static PyObject *dberror_value(char *action);
+static int error_handle(Connection *connection,
+                        Cursor *cursor,
+                        PyObject *type, PyObject *value);
 
 #ifdef IFXDB_MT
 #define KEY "ifxdbConn"
@@ -366,6 +478,7 @@ static char* getConnectionName(void)
   name = PyString_AS_STRING(conn);
   return name;
 }
+
 static void setConnectionName(const char* name)
 {
   PyObject *dict, *conn;
@@ -374,9 +487,9 @@ static void setConnectionName(const char* name)
     ifxdbConnKey = PyString_FromString(KEY);
 
   dict = PyThreadState_GetDict();
-  if (!name)
+  if (!name) {
     PyDict_DelItem(dict, ifxdbConnKey);
-  else {
+  } else {
     conn = PyString_FromString(name);
     PyDict_SetItem(dict, ifxdbConnKey, conn);
     Py_DECREF(conn);
@@ -389,8 +502,8 @@ static char* ifxdbConnName;
 #define setConnectionName(s) (ifxdbConnName = (s))
 #endif
 
-/* returns zero on success, nonzero on failure (as with sqlCheck) */
-static int setConnection(connectionObject *conn)
+/* returns zero on success, nonzero on failure (as with is_dberror) */
+static int setConnection(Connection *conn)
 {
   EXEC SQL BEGIN DECLARE SECTION;
   char *connectionName;
@@ -401,217 +514,68 @@ static int setConnection(connectionObject *conn)
   if (!connectionName || strcmp(connectionName, conn->name)) {
     connectionName = conn->name;
     EXEC SQL SET CONNECTION :connectionName;
-    if (sqlCheck("SET-CONNECTION")) return 1;
+    if (is_dberror(conn, NULL, "SET-CONNECTION")) return 1;
     setConnectionName(conn->name);
   }
   return 0;
 }
 
-/* End connections === */
-
-static int unsuccessful()
-{
-  return SQLCODE;
-}
-/* forget the function; use a macro instead */
-#define unsuccessful() (SQLCODE)
-
-/* Message generator to return human readable
-   error message.
- */
-static void ifxdbPrintError(const char *action)
-{
-  char message[512];
-  EXEC SQL BEGIN DECLARE SECTION;
-  char message1[255];
-  char message2[255];
-  int messlen1;
-  int messlen2;
-  int exc_cnt;
-  char sqlstate_2[6];
-  EXEC SQL END DECLARE SECTION;
-
-  EXEC SQL get diagnostics  exception 1
-      :message1 = MESSAGE_TEXT, :messlen1 = MESSAGE_LENGTH;
-
-#ifdef EXTENDED_ERROR_HANDLING
-  EXEC SQL get diagnostics :exc_cnt = NUMBER ;
-
-  if (exc_cnt > 1) {
-    EXEC SQL get diagnostics  exception 2
-        :sqlstate_2 = RETURNED_SQLSTATE,
-        :message2 = MESSAGE_TEXT, :messlen2 = MESSAGE_LENGTH;
-  }
-#else
-  exc_cnt = 1;
-#endif /* EXTENDED_ERROR_HANDLING */
-
-  /* In some cases, message1 is null and messlen1 undefined... */
-  if ( messlen1 > 0 && messlen1 <= 255 ) {
-    /* messlen1 value is often incorrect, so recalculate it */
-    messlen1 = byleng(message1, 254) - 1;
-    if (message1[messlen1] != '\n')
-      messlen1++;
-    message1[messlen1] = 0;
-  } else
-    strcpy(message1, "<NULL diagnostic message 1>");
-
-  if (exc_cnt > 1) {
-    /* In some cases, message2 is null and messlen2 undefined... */
-    if ( messlen2 > 0 && messlen2 <= 255 ) {
-      /* messlen2 value is often incorrect, so recalculate it */
-      messlen2 = byleng(message2, 254) - 1;
-      if (message2[messlen2] != '\n')
-        messlen2++;
-      message2[messlen2] = 0;
-    } else
-      strcpy(message2, "<NULL diagnostic message 2>");
-  }
-
-  if (exc_cnt > 1) {
-      sprintf(message,
-              "Error %d performing %s: %s (%s:%s)",
-              SQLCODE, action, message1, sqlstate_2, message2);
-      PyErr_SetObject(ifxdbError, 
-          Py_BuildValue("(sissss)", message, SQLCODE, action, message1,
-                                sqlstate_2, message2));
-  } else {
-      sprintf(message,
-              "Error %d performing %s: %s",
-              SQLCODE, action, message1);
-      PyErr_SetObject(ifxdbError, 
-          Py_BuildValue("(siss)", message, SQLCODE, action, message1));
-  }
-}
-
-/* returns 0 on success, 1 on failure */
-static int sqlCheck(const char *action)
-{
-  if (unsuccessful()) {
-    ifxdbPrintError(action);
-    return 1;
-  }
-  return 0; 
-}
-/* forget the function; use a macro instead */
-#define sqlCheck(action) (unsuccessful() ? ifxdbPrintError(action), 1 : 0)
-    
-/* End error reporter */
-
-/* Begin section for transaction management.
-*/
-
-#ifdef STEP2
-/* Experimental code.
-   Idea is to allow for user to run without transactions at will.
-*/
-static PyObject *ifxdbBegin(PyObject *self, PyObject *args)
-{
-  connectionObject *conn = connection(self);
-  if (conn->has_commit) {
-    if (setConnection(conn)) return NULL;
-    EXEC SQL BEGIN WORK;
-
-    if (unsuccessful()) {
-      connectionError(conn, "COMMIT");
-      return 0;
-    }
-  /* success */
-  Py_INCREF(Py_None);
-  return Py_None;
-}
-#endif
-
-static PyObject *ifxdbClose(PyObject *self, PyObject *args)
-{
-  connectionObject *conn = connection(self);
-  if (conn->has_commit) {
-    if (setConnection(conn)) return NULL;
-    EXEC SQL COMMIT WORK;
-
-    if (unsuccessful()) {
-      connectionError(conn, "COMMIT");
-      return 0;
-    }
-
-    /*
-    EXEC SQL DISCONNECT :connectionName ;
-    */
-  }
-  /* success */
-  Py_INCREF(Py_None);
-  return Py_None;
-}
-
-static PyObject *ifxdbRollback(PyObject *, PyObject *);
-static PyObject *ifxdbCommit(PyObject *, PyObject *);
-
-static PyMethodDef connectionMethods[] = {
-  { "cursor", ifxdbCursor, 1 } ,
-#ifdef STEP2
-  { "begin", ifxdbBegin, 1 } ,
-#endif
-  { "commit", ifxdbCommit, 1 } ,
-  { "rollback", ifxdbRollback, 1 } ,
-#ifdef STEP2
-  { "execute", ifxdbExec, 1} ,
-  { "fetchone", ifxdbFetchOne, 1} ,
-  { "fetchmany", ifxdbFetchMany, 1} ,
-  { "fetchall", ifxdbFetchAll, 1} ,
-  { "setinputsizes", ifxdbSetInputSizes, 1} ,
-  { "setoutputsize", ifxdbSetOutputSize, 1} ,
-#endif
-  { "close", ifxdbClose, 1 } ,
-  {0,     0}        /* Sentinel */
-};
-
-static PyObject *connectionGetAttr(PyObject *self,
-                            char *name)
-{
-  if (!strcmp(name, "Error")) {
-    Py_INCREF(ifxdbError);
-    return ifxdbError;
-  }
-  return Py_FindMethod (connectionMethods, self, name);
-}
-
-static void connectionDealloc(PyObject *self)
+static PyObject *Connection_close(Connection *self)
 {
   EXEC SQL BEGIN DECLARE SECTION;
   char *connectionName;
   EXEC SQL END DECLARE SECTION;
 
-  connectionName = connection(self)->name;
-  EXEC SQL DISCONNECT :connectionName ;
+  clear_messages(self);
+  require_open(self);
+
+  if (self->has_commit) {
+    if (setConnection(self)) return NULL;
+    EXEC SQL ROLLBACK WORK;
+    ret_on_dberror(self, NULL, "ROLLBACK");
+  }
+
+  connectionName = self->name;
+  EXEC SQL DISCONNECT :connectionName;
+
+  self->is_open = 0;
+
+  /* success */
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+
+static void Connection_dealloc(Connection *self)
+{
+  if (self->is_open) {
+    Connection_close(self);
+  }
 
   /* just in case the connection being destroyed is no longer current... */
-  if (getConnectionName() == connectionName)
+  if (getConnectionName() == self->name)
     setConnectionName(NULL);
 
-  PyMem_DEL(self);
+  Py_XDECREF(self->messages);
+  Py_XDECREF(self->errorhandler);
+
+  self->ob_type->tp_free((PyObject*)self);
 }
 
 /* If this connection has transactions, commit and
    restart transaction.
 */
-static PyObject *ifxdbCommit(PyObject *self, PyObject *args)
+static PyObject *Connection_commit(Connection *self)
 {
-  connectionObject *conn = connection(self);
-  if (conn->has_commit) {
-    if (setConnection(conn)) return NULL;
-    EXEC SQL COMMIT WORK;
+  clear_messages(self);
+  require_open(self);
 
-    if (unsuccessful()) {
-      connectionError(conn, "COMMIT");
-      return 0;
-    }
-    else {
-      EXEC SQL BEGIN WORK;
-      if (unsuccessful()) {
-        connectionError(conn, "BEGIN");
-        return 0;
-      }
-    }
+  if (self->has_commit) {
+    if (setConnection(self)) return NULL;
+    EXEC SQL COMMIT WORK;
+    ret_on_dberror(self, NULL, "COMMIT");
+
+    EXEC SQL BEGIN WORK;
+    ret_on_dberror(self, NULL, "BEGIN");
   }
   /* success */
   Py_INCREF(Py_None);
@@ -623,30 +587,28 @@ static PyObject *ifxdbCommit(PyObject *self, PyObject *args)
  We ROLLBACK and restart transaction but this has only meaning if there
  is support for transactions.
  */
-static PyObject *ifxdbRollback(PyObject *self, PyObject *args)
+static PyObject *Connection_rollback(Connection *self)
 {
-  connectionObject *conn = connection(self);
-  if (conn->has_commit) {
-    if (setConnection(conn)) return NULL;
-    EXEC SQL ROLLBACK WORK;
+  clear_messages(self);
+  require_open(self);
 
-    if (unsuccessful()) {
-      connectionError(conn, "ROLLBACK");
-      return 0;
-    }
-    else {
-      EXEC SQL BEGIN WORK;
-      if (unsuccessful()) {
-        connectionError(conn, "BEGIN");
-        return 0;
-      }
-    }
+  if (setConnection(self)) return NULL;
+
+  if (self->has_commit) {
+    EXEC SQL ROLLBACK WORK;
+    ret_on_dberror(self, NULL, "ROLLBACK");
+  } else {
+    error_handle(self, NULL,
+                 ExcNotSupportedError, dberror_value("ROLLBACK"));
+    return NULL;
   }
+
+  EXEC SQL BEGIN WORK;
+  ret_on_dberror(self, NULL, "BEGIN");
+
   Py_INCREF(Py_None);
   return Py_None;
 }
-
-/* End sections transaction support === */
 
 /* Begin section for parser of sql statements w.r.t.
    dynamic variable binding.
@@ -667,9 +629,11 @@ static void initParseContext(parseContext *ct, const char *c, char *out)
   ct->ptr = c;
   ct->out = out;
   ct->parmCount = 0;
+  ct->parmIdx = 0;
+  ct->prev = '\0';
 }
 
-static int doParse(parseContext *ct) 
+static int doParse(parseContext *ct)
 {
   int rc = 0;
   register const char *in = ct->ptr;
@@ -677,7 +641,7 @@ static int doParse(parseContext *ct)
   register char ch;
 
   ct->isParm = 0;
-  while (ch = *in++) {
+  while ( (ch = *in++) ) {
     if (ct->state == ch) {
       ct->state = 0;
     } else if (ct->state == 0){
@@ -718,16 +682,17 @@ static int doParse(parseContext *ct)
 }
 
 
-static int ibindRaw(struct sqlvar_struct *var, PyObject *item)
+static int ibindBinary(struct sqlvar_struct *var, PyObject *item)
 {
-  PyObject *nitem = dbiValue(item);
-  PyObject *sitem = PyObject_Str(nitem);
-#ifdef PyString_GET_SIZE
-  int n = PyString_GET_SIZE(sitem);
-#else
-  int n = PyString_Size(sitem);
-#endif
-  loc_t *loc = (loc_t*) malloc(sizeof(loc_t)) ;
+  char *buf;
+  int n;
+  loc_t *loc;
+
+  if (PyObject_AsReadBuffer(item, (const void**)&buf, &n) == -1) {
+    return 0;
+  }
+
+  loc = (loc_t*) malloc(sizeof(loc_t));
   loc->loc_loctype = LOCMEMORY;
   loc->loc_buffer = malloc(n);
   loc->loc_bufsize = n;
@@ -735,38 +700,68 @@ static int ibindRaw(struct sqlvar_struct *var, PyObject *item)
   loc->loc_oflags = 0;
   loc->loc_mflags = 0;
   loc->loc_indicator = 0;
-  memcpy(loc->loc_buffer,
-         PyString_AS_STRING((PyStringObject*)sitem),
-         n);
-    
+  memcpy(loc->loc_buffer, buf, n);
+
   var->sqldata = (char *) loc;
   var->sqllen = sizeof(loc_t);
   var->sqltype = CLOCATORTYPE;
   *var->sqlind = 0;
-  Py_DECREF(sitem);
   return 1;
 }
 
-static int ibindDate(struct sqlvar_struct *var, PyObject *item)
+static int ibindDateTime(struct sqlvar_struct *var, PyObject *datetime)
 {
-  PyObject *sitem = PyNumber_Long(dbiValue(item));
-  if (sitem) {
-    long n = PyLong_AsLong(sitem);
-    dtime_t *dt = (dtime_t*) malloc(sizeof(dtime_t)) ;
-    char buf[20];
-    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", localtime(&n));
-    dt->dt_qual = TU_DTENCODE(TU_YEAR, TU_SECOND);
-    dtcvasc(buf, dt);
-    var->sqldata = (char *) dt;
-    var->sqllen = sizeof(dtime_t);
-    var->sqltype = CDTIMETYPE;
-    *var->sqlind = 0;
-    Py_DECREF(sitem);
-  }
-  else {
-    PyErr_SetString(ifxdbError, "type error in date object");
+  int year,month,day,hour,minute,second,usec,ret;
+  dtime_t* dt;
+  char buf[26];
+
+  year = PyDateTime_GET_YEAR(datetime);
+  month = PyDateTime_GET_MONTH(datetime);
+  day = PyDateTime_GET_DAY(datetime);
+  hour = PyDateTime_DATE_GET_HOUR(datetime);
+  minute = PyDateTime_DATE_GET_MINUTE(datetime);
+  second = PyDateTime_DATE_GET_SECOND(datetime);
+  usec = PyDateTime_DATE_GET_MICROSECOND(datetime);
+
+  dt = (dtime_t*)malloc(sizeof(dtime_t));
+  dt->dt_qual = TU_DTENCODE(TU_YEAR, TU_F5);
+  snprintf(buf, sizeof(buf), "%d-%d-%d %d:%d:%d.%d", year, month, day,
+           hour, minute, second, usec/10);
+  if ((ret = dtcvasc(buf, dt)) != 0) {
+    PyErr_Format(ExcInterfaceError, "Failed to parse datetime value (%s). "
+                 "dtcvasc() returned: %d", buf, ret);
     return 0;
   }
+
+  var->sqldata = (char*)dt;
+  var->sqllen = sizeof(dtime_t);
+  var->sqltype = CDTIMETYPE;
+  *var->sqlind = 0;
+
+  return 1;
+}
+
+static int ibindDate(struct sqlvar_struct *var, PyObject *date)
+{
+  short mdy_date[3];
+  int ret;
+  long *d= (long*)malloc(sizeof(long));
+  mdy_date[2] = PyDateTime_GET_YEAR(date);
+  mdy_date[1] = PyDateTime_GET_DAY(date);
+  mdy_date[0] = PyDateTime_GET_MONTH(date);
+
+  if ((ret = rmdyjul(mdy_date, d)) != 0) {
+    PyErr_Format(ExcInterfaceError, "Failed to parse convert value "
+                 "(%4d-%2d-%2d). rmdyjul() returned: %d",
+                 mdy_date[2], mdy_date[0], mdy_date[1], ret);
+    return 0;
+  }
+
+  var->sqldata = (char*)d;
+  var->sqllen = sizeof(long);
+  var->sqltype = CDATETYPE;
+  *var->sqlind = 0;
+
   return 1;
 }
 
@@ -801,21 +796,20 @@ typedef int (*ibindFptr)(struct sqlvar_struct *, PyObject*);
 
 static ibindFptr ibindFcn(PyObject* item)
 {
-  if (dbiIsRaw(item)) {
-    return ibindRaw;
-  }
-  else if(dbiIsDate(item)) {
-    return ibindDate;
-  }
-  else if(item == Py_None) {
+  if (PyBuffer_Check(item)) {
+    return ibindBinary;
+  } else if (PyDateTime_Check(item)) {
+    return (ibindFptr)ibindDateTime;
+  } else if (PyDate_Check(item)) {
+    return (ibindFptr)ibindDate;
+  } else if(item == Py_None) {
     return ibindNone;
-  }
-  else {
+  } else {
     return ibindString;
   }
 }
 
-static void allocSlots(cursorObject *cur, int n_slots)
+static void allocSlots(Cursor *cur, int n_slots)
 {
   cur->daIn.sqld = n_slots;
   cur->daIn.sqlvar = calloc(n_slots, sizeof(struct sqlvar_struct));
@@ -824,7 +818,7 @@ static void allocSlots(cursorObject *cur, int n_slots)
 
 #define PARM_COUNT_GUESS 4
 #define PARM_COUNT_INCREMENT 4
-static int parseSql(cursorObject *cur, register char *out, const char *in)
+static int parseSql(Cursor *cur, register char *out, const char *in)
 {
   parseContext ctx;
   int i, n_slots;
@@ -858,13 +852,19 @@ static int parseSql(cursorObject *cur, register char *out, const char *in)
   return 1;
 }
 
-static int bindInput(cursorObject *cur, PyObject *vars)
+static int bindInput(Cursor *cur, PyObject *vars)
 {
   struct sqlvar_struct *var = cur->daIn.sqlvar;
   int n_vars = vars ? PyObject_Length(vars) : 0;
   int i;
+  int maxp=0;
 
-  for (i = 0; i < cur->daIn.sqld; ++i)
+  if (vars && !PySequence_Check(vars)) {
+    PyErr_SetString(PyExc_TypeError, "SQL parameters are not a sequence");
+    return 0;
+  }
+
+  for (i = 0; i < cur->daIn.sqld; ++i) {
     if (cur->parmIdx[i] < n_vars) {
       int success;
       PyObject *item = PySequence_GetItem(vars, cur->parmIdx[i]);
@@ -873,37 +873,24 @@ static int bindInput(cursorObject *cur, PyObject *vars)
       Py_DECREF(item);  /* PySequence_GetItem increments it */
       if (!success)
         return 0;
+      maxp = maxp > cur->parmIdx[i] ? maxp : cur->parmIdx[i];
     } else {
-      PyErr_SetString(ifxdbError, " too few actual parameters");
+      error_handle(cur->conn, cur, ExcInterfaceError,
+                   PyString_FromString("too few actual parameters"));
       return 0;
     }
+  }
+
+  if (maxp+1 < n_vars) {
+    error_handle(cur->conn, cur, ExcInterfaceError,
+                 PyString_FromString("too many actual parameters"));
+    return 0;
+  }
 
   return 1;
 }
 
-static PyObject *typeOf(int type)
-{
-  switch(type & SQLTYPE){
-  case SQLBYTES:
-  case SQLTEXT:
-    return DbiRaw;
-  case SQLDATE:
-  case SQLDTIME:
-    return DbiDate;
-  case SQLFLOAT:
-  case SQLSMFLOAT:
-  case SQLDECIMAL:
-  case SQLINT:
-  case SQLSMINT:
-  case SQLSERIAL:
-  case SQLMONEY:
-    return DbiNumber;
-  default:
-    return DbiString;
-  }
-}
-
-static void bindOutput(cursorObject *cur)
+static void bindOutput(Cursor *cur)
 {
   char * bufp;
   int pos;
@@ -913,16 +900,18 @@ static void bindOutput(cursorObject *cur)
   cur->indOut = calloc(cur->daOut->sqld, sizeof(short));
   cur->originalType = calloc(cur->daOut->sqld, sizeof(int));
 
+  Py_DECREF(cur->description);
   cur->description = PyTuple_New(cur->daOut->sqld);
   for (pos = 0, var = cur->daOut->sqlvar;
        pos < cur->daOut->sqld;
        pos++, var++) {
-    PyObject *new_tuple = Py_BuildValue("(sOiiiii)",
-                                        var->sqlname, 
-                                        typeOf(var->sqltype),
+    PyObject *new_tuple = Py_BuildValue("(sNiiOOi)",
+                                        var->sqlname,
+                                        PyString_FromString(rtypname(var->sqltype)),
                                         var->sqllen,
                                         var->sqllen,
-                                        0, 0, !(var->sqltype & SQLNONULL));
+                                        Py_None, Py_None,
+                                        !(var->sqltype & SQLNONULL));
     PyTuple_SET_ITEM(cur->description, pos, new_tuple);
 
     var->sqlind = &cur->indOut[pos];
@@ -957,13 +946,12 @@ static void bindOutput(cursorObject *cur)
       var->sqltype = CLONGTYPE;
       break;
     case SQLDTIME:
-      var->sqllen = 20; /* big enough */
-      /* fall through */
+      var->sqltype = CDTIMETYPE;
+      break;
     default:
       var->sqltype = CCHARTYPE;
-      var->sqllen = rtypmsize(var->sqltype, var->sqllen);
       break;
-      
+
     }
     var->sqllen = rtypmsize(var->sqltype, var->sqllen);
     count = rtypalign(count, var->sqltype) + var->sqllen;
@@ -975,7 +963,7 @@ static void bindOutput(cursorObject *cur)
        pos < cur->daOut->sqld;
        pos++, var++) {
     bufp = (char *) rtypalign( (int) bufp, var->sqltype);
-    
+
     if (var->sqltype == CLOCATORTYPE) {
       loc_t *loc = (loc_t*) bufp;
       loc->loc_loctype = LOCMEMORY;
@@ -985,137 +973,150 @@ static void bindOutput(cursorObject *cur)
     }
     var->sqldata = bufp;
     bufp += var->sqllen;
+
+    if (var->sqltype == CDTIMETYPE) {
+      /* let the database set the correct datetime format */
+      var->sqllen = 0;
+    }
   }
 }
 
-#define returnOnError(action) if (sqlCheck(action)) return 0
-
-static PyObject *ifxdbCurGetSqlerrd(PyObject *self, PyObject *args)
+static PyObject *Cursor_getsqlerrd(Cursor *self, void* closure)
 {
-  cursorObject *cur = cursor(self);
   return Py_BuildValue("(iiiiii)",
-    cur->sqlerrd[0], cur->sqlerrd[1], cur->sqlerrd[2],
-    cur->sqlerrd[3], cur->sqlerrd[4], cur->sqlerrd[5]);
+    self->sqlerrd[0], self->sqlerrd[1], self->sqlerrd[2],
+    self->sqlerrd[3], self->sqlerrd[4], self->sqlerrd[5]);
 }
 
-static PyObject *ifxdbCurGetRowcount(PyObject *self, PyObject *args)
+static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
 {
-  cursorObject *cur = cursor(self);
-  return Py_BuildValue("i", cur->rowcount);
-}
-
-static PyObject *ifxdbCurExec(PyObject *self, PyObject *args)
-{
-  cursorObject *cur = cursor(self);
-  struct sqlda *tdaIn = &cur->daIn;
-  struct sqlda *tdaOut = cur->daOut;
-  PyObject *op;
+  struct sqlda *tdaIn = &self->daIn;
+  struct sqlda *tdaOut = self->daOut;
+  PyObject *op, *inputvars=NULL;
   const char *sql;
   int i;
+  static char* kwdlist[] = { "operation", "parameters", 0 };
   EXEC SQL BEGIN DECLARE SECTION;
-  char *queryName = cur->queryName;
-  char *cursorName = cur->cursorName;
+  char *queryName = self->queryName;
+  char *cursorName = self->cursorName;
   char *newSql;
   EXEC SQL END DECLARE SECTION;
-  
-  PyObject *inputvars = 0;
-  if (!PyArg_ParseTuple(args, "s|O", &sql, &inputvars))
-    return 0;
+
+  clear_messages(self);
+  require_cursor_open(self);
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|O", kwdlist,
+                                   &sql, &inputvars))
+    return NULL;
   op = PyTuple_GET_ITEM(args, 0);
 
-#ifdef STEP1
   /* Make sure we talk to the right database. */
-  if (setConnection(connection(cur->my_conx))) return NULL;
-#endif
+  if (setConnection(self->conn)) return NULL;
 
-  if (op == cur->op) {
-    doCloseCursor(cur, 0);
-    cleanInputBinding(cur);
+  if (op == self->op) {
+    doCloseCursor(self, 0);
+    cleanInputBinding(self);
   } else {
-    doCloseCursor(cur, 1);
-    deleteInputBinding(cur);
-    deleteOutputBinding(cur);
+    doCloseCursor(self, 1);
+    deleteInputBinding(self);
+    deleteOutputBinding(self);
 
     /* `newSql' may be shorter than but will never exceed length of `sql' */
     newSql = malloc(strlen(sql) + 1);
-    if (!parseSql(cur, newSql, sql)) {
+    if (!parseSql(self, newSql, sql)) {
       free(newSql);
       return 0;
     }
     EXEC SQL PREPARE :queryName FROM :newSql;
-    for (i=0; i<6; i++) cur->sqlerrd[i] = sqlca.sqlerrd[i];
+    for (i=0; i<6; i++) self->sqlerrd[i] = sqlca.sqlerrd[i];
     free(newSql);
-    returnOnError("PREPARE");
-    cur->state = 1;
+    ret_on_dberror_cursor(self, "PREPARE");
+    self->state = 1;
 
     EXEC SQL DESCRIBE :queryName INTO tdaOut;
-    cur->daOut = tdaOut;
-    cur->stype = SQLCODE;
+    self->daOut = tdaOut;
+    self->stype = SQLCODE;
 
-    if (cur->stype == 0) {
-      bindOutput(cur);
+    if (self->stype == 0 || self->stype == SQ_EXECPROC) {
+      bindOutput(self);
 
       EXEC SQL DECLARE :cursorName CURSOR FOR :queryName;
-      returnOnError("DECLARE");
+      ret_on_dberror_cursor(self, "DECLARE");
       EXEC SQL FREE :queryName;
-      returnOnError("FREE");
-      cur->state = 2;
+      ret_on_dberror_cursor(self, "FREE");
+      self->state = 2;
     } else {
-      free(cur->daOut);
-      cur->daOut = NULL;
+      free(self->daOut);
+      self->daOut = NULL;
     }
 
     /* cache operation reference */
-    cur->op = op;
+    self->op = op;
     Py_INCREF(op);
   }
 
-  if (!bindInput(cur, inputvars))
+  if (!bindInput(self, inputvars))
     return 0;
 
-  if (cur->stype == 0) {
+  if (self->stype == 0 || self->stype == SQ_EXECPROC) {
     EXEC SQL OPEN :cursorName USING DESCRIPTOR tdaIn;
-    returnOnError("OPEN");
-    cur->state = 3;
+    ret_on_dberror_cursor(self, "OPEN");
+    self->state = 3;
 
-    for (i=0; i<6; i++) cur->sqlerrd[i] = sqlca.sqlerrd[i];
-    cur->rowcount = sqlca.sqlerrd[0]; /* ESTIMATED number of rows */
+    for (i=0; i<6; i++) self->sqlerrd[i] = sqlca.sqlerrd[i];
+    self->rowcount = -1;
     Py_INCREF(Py_None);
     return Py_None;
   } else {
     Py_BEGIN_ALLOW_THREADS;
     EXEC SQL EXECUTE :queryName USING DESCRIPTOR tdaIn;
     Py_END_ALLOW_THREADS;
-    if (unsuccessful())
-      cursorError(cur, "EXEC");
-    else {
-      for (i=0; i<6; i++) cur->sqlerrd[i] = sqlca.sqlerrd[i];
-      cur->rowcount = sqlca.sqlerrd[2];
-      return Py_BuildValue("i", sqlca.sqlerrd[2]); /* number of row */
+    ret_on_dberror_cursor(self, "EXECUTE");
+
+    for (i=0; i<6; i++) self->sqlerrd[i] = sqlca.sqlerrd[i];
+    switch (self->stype) {
+      case SQ_UPDATE:
+      case SQ_UPDCURR:
+      case SQ_UPDALL:
+      case SQ_DELETE:
+      case SQ_DELCURR:
+      case SQ_DELALL:
+      case SQ_INSERT:
+        self->rowcount = sqlca.sqlerrd[2];
+        break;
+      default:
+        self->rowcount = -1;
+        break;
     }
+
+    return Py_BuildValue("i", self->rowcount); /* number of row */
   }
   /* error return */
-  return 0;
+  return NULL;
 }
 
-static PyObject *ifxdbCurExecMany(PyObject *self, PyObject *args)
+static PyObject *Cursor_executemany(Cursor *self,
+                                    PyObject *args,
+                                    PyObject *kwds)
 {
-  cursorObject *cur = cursor(self);
-  struct sqlda *tdaIn = &cur->daIn;
-  struct sqlda *tdaOut = cur->daOut;
-  PyObject *op;
+  struct sqlda *tdaIn = &self->daIn;
+  struct sqlda *tdaOut = self->daOut;
+  PyObject *op, *params, *inputvars = 0;
   const char *sql;
   int i, len;
   int rowcount = 0, inputDirty = 0, useInsertCursor;
+  static char* kwdlist[] = { "operation", "seq_of_parameters", 0 };
   EXEC SQL BEGIN DECLARE SECTION;
-  char *queryName = cur->queryName;
-  char *cursorName = cur->cursorName;
+  char *queryName = self->queryName;
+  char *cursorName = self->cursorName;
   char *newSql;
   EXEC SQL END DECLARE SECTION;
-  
-  PyObject *params, *inputvars = 0;
-  if (!PyArg_ParseTuple(args, "sO", &sql, &params))
-    return 0;
+
+  clear_messages(self);
+  require_cursor_open(self);
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "sO", kwdlist, &sql, &params))
+    return NULL;
   op = PyTuple_GET_ITEM(args, 0);
   len = PySequence_Size(params);
   if (len == -1) {
@@ -1124,110 +1125,107 @@ static PyObject *ifxdbCurExecMany(PyObject *self, PyObject *args)
   }
 
   /* Make sure we talk to the right database. */
-  if (setConnection(connection(cur->my_conx))) return NULL;
+  if (setConnection(self->conn)) return NULL;
 
-  if (op == cur->op) {
-    doCloseCursor(cur, 0);
-    cleanInputBinding(cur);
+  if (op == self->op) {
+    doCloseCursor(self, 0);
+    cleanInputBinding(self);
     useInsertCursor =
-      (connection(cur->my_conx)->has_commit && cur->stype==SQ_INSERT);
+      (self->conn->has_commit && self->stype==SQ_INSERT);
   } else {
-    doCloseCursor(cur, 1);
-    deleteInputBinding(cur);
-    deleteOutputBinding(cur);
+    doCloseCursor(self, 1);
+    deleteInputBinding(self);
+    deleteOutputBinding(self);
 
     /* `newSql' may be shorter than but will never exceed length of `sql' */
     newSql = malloc(strlen(sql) + 1);
-    if (!parseSql(cur, newSql, sql)) {
+    if (!parseSql(self, newSql, sql)) {
       free(newSql);
       return 0;
     }
     EXEC SQL PREPARE :queryName FROM :newSql;
-    for (i=0; i<6; i++) cur->sqlerrd[i] = sqlca.sqlerrd[i];
+    for (i=0; i<6; i++) self->sqlerrd[i] = sqlca.sqlerrd[i];
     free(newSql);
-    returnOnError("PREPARE");
-    cur->state = 1;
+    ret_on_dberror_cursor(self, "PREPARE");
+    self->state = 1;
 
     EXEC SQL DESCRIBE :queryName INTO tdaOut;
-    cur->daOut = tdaOut;
-    cur->stype = SQLCODE;
+    self->daOut = tdaOut;
+    self->stype = SQLCODE;
 
-    if (cur->stype == 0) {
-      bindOutput(cur);
+    if (self->stype == 0) {
+      bindOutput(self);
 
       EXEC SQL DECLARE :cursorName CURSOR FOR :queryName;
-      returnOnError("DECLARE");
+      ret_on_dberror_cursor(self, "DECLARE");
       EXEC SQL FREE :queryName;
-      returnOnError("FREE");
-      cur->state = 2;
+      ret_on_dberror_cursor(self, "FREE");
+      self->state = 2;
     } else {
-      free(cur->daOut);
-      cur->daOut = NULL;
+      free(self->daOut);
+      self->daOut = NULL;
     }
 
     useInsertCursor =
-      (connection(cur->my_conx)->has_commit && cur->stype==SQ_INSERT);
+      (self->conn->has_commit && self->stype==SQ_INSERT);
 
     if (useInsertCursor) {
       EXEC SQL DECLARE :cursorName CURSOR FOR :queryName;
-      returnOnError("DECLARE");
+      ret_on_dberror_cursor(self, "DECLARE");
       EXEC SQL FREE :queryName;
-      returnOnError("FREE");
-      cur->state = 2;
+      ret_on_dberror_cursor(self, "FREE");
+      self->state = 2;
     }
 
     /* cache operation reference */
-    cur->op = op;
+    self->op = op;
     Py_INCREF(op);
   }
 
   if (useInsertCursor) {
     EXEC SQL OPEN :cursorName;
-    returnOnError("OPEN");
-    cur->state = 3;
+    ret_on_dberror_cursor(self, "OPEN");
+    self->state = 3;
   }
 
   for (i=0; i<len; i++) {
     inputvars = PySequence_GetItem(params, i);
     if (inputDirty) {
-      cleanInputBinding(cur);
+      cleanInputBinding(self);
     }
-    if (!bindInput(cur, inputvars))
+    if (!bindInput(self, inputvars))
       return 0;
     inputDirty = 1;
- 
-    if (cur->stype == 0) {
+
+    if (self->stype == 0) {
       EXEC SQL OPEN :cursorName USING DESCRIPTOR tdaIn;
-      returnOnError("OPEN");
-      cur->state = 3;
-  
+      ret_on_dberror_cursor(self, "OPEN");
+      self->state = 3;
+
       rowcount = -1;
     } else {
       Py_BEGIN_ALLOW_THREADS;
       if (useInsertCursor) {
         EXEC SQL PUT :cursorName USING DESCRIPTOR tdaIn;
-      }
-      else {
+      } else {
         EXEC SQL EXECUTE :queryName USING DESCRIPTOR tdaIn;
       }
       Py_END_ALLOW_THREADS;
-      if (unsuccessful())
-        cursorError(cur, "EXEC");
-      else {
-        switch (cur->stype) {
-          case SQ_UPDATE:
-          case SQ_UPDCURR:
-          case SQ_UPDALL:
-          case SQ_DELETE:
-          case SQ_DELCURR:
-          case SQ_DELALL:
-          case SQ_INSERT:
-            rowcount += sqlca.sqlerrd[2];
-            break;
-          default:
-            rowcount = -1;
-            break;
-        }
+      ret_on_dberror_cursor(self, "EXECUTE");
+
+      switch (self->stype) {
+        case SQ_UPDATE:
+        case SQ_UPDCURR:
+        case SQ_UPDALL:
+        case SQ_DELETE:
+        case SQ_DELCURR:
+        case SQ_DELALL:
+        case SQ_INSERT:
+          rowcount += sqlca.sqlerrd[2];
+          break;
+        default:
+          rowcount = -1;
+          break;
       }
     }
     Py_DECREF(inputvars);
@@ -1238,73 +1236,69 @@ static PyObject *ifxdbCurExecMany(PyObject *self, PyObject *args)
     Py_END_ALLOW_THREADS;
     rowcount += sqlca.sqlerrd[2];
   }
-  
-  cur->rowcount = rowcount;
-  for (i=0; i<6; i++) cur->sqlerrd[i] = sqlca.sqlerrd[i];
+
+  self->rowcount = rowcount;
+  for (i=0; i<6; i++) self->sqlerrd[i] = sqlca.sqlerrd[i];
   Py_INCREF(Py_None);
   return Py_None;
 }
-
-/* Routines for manipulations of datetime
-*/
-static int convertToInt(dtime_t *d, const char *fmt)
-{
-  char buf[20];
-  int x = dttofmtasc(d, buf, 20, (char *)fmt);
-  return atoi(buf);
-}
-
-static time_t convertDtToUnix(dtime_t *d)
-{
-  struct tm gt;
-    
-  gt.tm_isdst = -1;
-  
-  gt.tm_year = convertToInt(d, "%Y") - 1900;
-  gt.tm_mon = convertToInt(d, "%m") - 1;   /* month */
-  gt.tm_mday = convertToInt(d, "%d");   /* day */
-  gt.tm_hour = convertToInt(d, "%H");   /* hour */
-  gt.tm_min = convertToInt(d, "%M");   /* minute */
-  gt.tm_sec = convertToInt(d, "%S");   /* second */
-  return mktime(&gt);
-}
-
-static time_t convertAscToUnix(const char *d)
-{
-  struct tm gt;
-  memset(&gt, '\0', sizeof(gt));
-  sscanf(d, "%04d-%02d-%02d %02d:%02d:%02d",
-         &gt.tm_year,
-         &gt.tm_mon,
-         &gt.tm_mday,
-         &gt.tm_hour,
-         &gt.tm_min,
-         &gt.tm_sec);
-  gt.tm_year -= 1900;
-  gt.tm_mon -= 1;
-  gt.tm_isdst = -1;
-
-  return mktime(&gt);
-}
-
-/* End datetime === */
 
 static PyObject *doCopy(/* const */ void *data, int type)
 {
   switch(type){
   case SQLDATE:
   {
-    char buf[11];
-    rfmtdate(*(long*)data, "yyyy-mm-dd", buf);
-    return dbiMakeDate(PyInt_FromLong(convertAscToUnix(buf)));
-  }  
+    short mdy_date[3];
+    rjulmdy(*(long*)data, mdy_date);
+    return PyDate_FromDate(mdy_date[2], mdy_date[0], mdy_date[1]);
+  }
   case SQLDTIME:
-    return dbiMakeDate(PyInt_FromLong(convertAscToUnix((char*)data)));
+  {
+    int i, pos;
+    int year=1,month=1,day=1,hour=0,minute=0,second=0,usec=0;
+    dtime_t* dt = (dtime_t*)data;
+    for (pos = 0, i = TU_START(dt->dt_qual); i <= TU_END(dt->dt_qual); ++i) {
+      switch (i) {
+      case TU_YEAR:
+        year = dt->dt_dec.dec_dgts[pos++]*100;
+        year += dt->dt_dec.dec_dgts[pos++];
+        break;
+      case TU_MONTH:
+        month = dt->dt_dec.dec_dgts[pos++];
+        break;
+      case TU_DAY:
+        day = dt->dt_dec.dec_dgts[pos++];
+        break;
+      case TU_HOUR:
+        hour = dt->dt_dec.dec_dgts[pos++];
+        break;
+      case TU_MINUTE:
+        minute = dt->dt_dec.dec_dgts[pos++];
+        break;
+      case TU_SECOND:
+        second = dt->dt_dec.dec_dgts[pos++];
+        break;
+      case TU_F1:
+        usec += dt->dt_dec.dec_dgts[pos++] * 10000;
+        break;
+      case TU_F3:
+        usec += dt->dt_dec.dec_dgts[pos++] * 100;
+        break;
+      case TU_F5:
+        usec += dt->dt_dec.dec_dgts[pos++];
+        break;
+      }
+    }
+    return PyDateTime_FromDateAndTime(year, month, day,
+                                      hour, minute, second, usec);
+  }
   case SQLCHAR:
   case SQLVCHAR:
   case SQLNCHAR:
   case SQLNVCHAR:
+#ifdef SQLLVARCHAR
   case SQLLVARCHAR:
+#endif
   {
       /* clip trailing spaces */
       register size_t len = strlen((char*)data);
@@ -1330,85 +1324,331 @@ static PyObject *doCopy(/* const */ void *data, int type)
     return PyInt_FromLong(*(long*)data);
   case SQLBYTES:
   case SQLTEXT:
-    ((loc_t*)data)->loc_mflags |= LOC_ALLOC;
-    return dbiMakeRaw
-      (PyString_FromStringAndSize(((loc_t*)data)->loc_buffer,
-                                  ((loc_t*)data)->loc_size));
-  }
+  {
+    PyObject *buffer;
+    char *b_mem;
+    int b_len;
+    loc_t *l = (loc_t*)data;
+
+    l->loc_mflags |= LOC_ALLOC;
+    buffer = PyBuffer_New(l->loc_size);
+
+    if (PyObject_AsWriteBuffer(buffer, (void**)&b_mem, &b_len) == -1) {
+      Py_DECREF(buffer);
+      return NULL;
+    }
+
+    memcpy(b_mem, l->loc_buffer, b_len);
+    return buffer;
+  } /* case SQLTEXT */
+  } /* switch */
   Py_INCREF(Py_None);
   return Py_None;
 }
 
-static PyObject *processOutput(cursorObject *cur)
+static PyObject *processOutput(Cursor *cur)
 {
-  PyObject *row = PyTuple_New(cur->daOut->sqld);
+  PyObject *row;
   int pos;
   struct sqlvar_struct *var;
-
-#ifdef AIX
-  /* ### deal with some wacky bug in AIX's mktime() */
-  printf("");
-#endif
+  if (cur->rowformat == CURSOR_ROWFORMAT_DICT) {
+    row = PyDict_New();
+  } else {
+    row = PyTuple_New(cur->daOut->sqld);
+  }
 
   for (pos = 0, var = cur->daOut->sqlvar;
        pos < cur->daOut->sqld;
        pos++, var++) {
 
     PyObject *v;
-    if (*var->sqlind < 0 && (!ifxdbMaskNulls)) {
+    if (*var->sqlind < 0) {
       v = Py_None;
       Py_INCREF(v);
-    }
-    else {
+    } else {
       v = doCopy(var->sqldata, cur->originalType[pos]);
     }
-      
-    PyTuple_SET_ITEM(row, pos, v);
+
+    if (cur->rowformat == CURSOR_ROWFORMAT_DICT) {
+      PyDict_SetItemString(row, var->sqlname, v);
+    } else {
+      PyTuple_SET_ITEM(row, pos, v);
+    }
   }
   return row;
 }
 
-
-
-static PyObject *ifxdbCurFetchOne(PyObject *self, PyObject *args)
+static PyObject *Connection_cursor(Connection *self, PyObject *args, PyObject *kwds)
 {
-  cursorObject *cur = cursor(self);
-  struct sqlda *tdaOut = cur->daOut;
+  PyObject *a, *cur;
+  int i;
+
+  require_open(self);
+
+  a = PyTuple_New(PyTuple_Size(args) + 1);
+  Py_INCREF(self);
+  PyTuple_SET_ITEM(a, 0, (PyObject*)self);
+  for (i = 0; i < PyTuple_Size(args); ++i) {
+    PyObject *o = PyTuple_GetItem(args, i);
+    Py_INCREF(o);
+    PyTuple_SET_ITEM(a, i+1, o);
+  }
+
+  cur = PyObject_Call((PyObject*)&Cursor_type, a, kwds);
+  Py_DECREF(a);
+  return cur;
+}
+
+static void cleanInputBinding(Cursor *cur)
+{
+  struct sqlda *da = &cur->daIn;
+  if (da->sqlvar) {
+    int i;
+    for (i=0; i<da->sqld; i++) {
+      /* may not actually exist in some err cases */
+      if ( da->sqlvar[i].sqldata) {
+        if (da->sqlvar[i].sqltype == CLOCATORTYPE) {
+          loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
+          if (loc->loc_buffer) {
+            free(loc->loc_buffer);
+          }
+        }
+        free(da->sqlvar[i].sqldata);
+      }
+    }
+  }
+}
+
+static void deleteInputBinding(Cursor *cur)
+{
+  cleanInputBinding(cur);
+  if (cur->daIn.sqlvar) {
+    free(cur->daIn.sqlvar);
+    cur->daIn.sqlvar = 0;
+    cur->daIn.sqld = 0;
+  }
+  if (cur->indIn) {
+    free(cur->indIn);
+    cur->indIn = 0;
+  }
+  if (cur->parmIdx) {
+    free(cur->parmIdx);
+    cur->parmIdx = 0;
+  }
+}
+
+static void deleteOutputBinding(Cursor *cur)
+{
+  struct sqlda *da = cur->daOut;
+  if (da && da->sqlvar) {
+    int i;
+    for (i=0; i<da->sqld; i++)
+      if (da->sqlvar[i].sqldata &&
+          (da->sqlvar[i].sqltype == CLOCATORTYPE)) {
+        loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
+        if (loc->loc_buffer)
+          free(loc->loc_buffer);
+      }
+    free(cur->daOut);
+    cur->daOut = 0;
+  }
+  if (cur->indOut) {
+    free(cur->indOut);
+    cur->indOut = 0;
+  }
+  if (cur->originalType) {
+    free(cur->originalType);
+    cur->originalType = 0;
+  }
+  if (cur->outputBuffer) {
+    free(cur->outputBuffer);
+    cur->outputBuffer = 0;
+  }
+
+  Py_INCREF(Py_None);
+  Py_DECREF(cur->description);
+  cur->description = Py_None;
+}
+
+/* assumes that caller has already called setConnection */
+static void doCloseCursor(Cursor *cur, int doFree)
+{
+  EXEC SQL BEGIN DECLARE SECTION;
+  char *cursorName = cur->cursorName;
+  char *queryName = cur->queryName;
+  EXEC SQL END DECLARE SECTION;
+
+  if (cur->stype == 0) {
+    /* if cursor is opened, close it */
+    if (cur->state == 3) {
+      EXEC SQL CLOSE :cursorName;
+      cur->state = 4;
+    }
+
+    if (doFree) {
+      /* if cursor is prepared but not declared, free the statement */
+      if (cur->state == 1)
+        EXEC SQL FREE :queryName;
+
+      /* if cursor is at least declared, free it */
+      if (cur->state >= 2)
+        EXEC SQL FREE :cursorName;
+
+      cur->state = 0;
+    }
+  } else {
+    if (doFree && cur->state == 1) {
+      /* if statement is prepared, free it */
+      EXEC SQL FREE :queryName;
+      cur->state = 0;
+    }
+  }
+}
+
+static void Cursor_dealloc(Cursor *self)
+{
+  /* Make sure we talk to the right database. */
+  if (self->conn) {
+    if (setConnection(self->conn))
+      PyErr_Clear();
+
+    doCloseCursor(self, 1);
+    deleteInputBinding(self);
+    deleteOutputBinding(self);
+
+    Py_XDECREF(self->conn);
+    Py_XDECREF(self->messages);
+    Py_XDECREF(self->errorhandler);
+
+    free(self->cursorName);
+  }
+
+  self->ob_type->tp_free((PyObject*)self);
+}
+
+static PyObject *Cursor_close(Cursor *self)
+{
+  clear_messages(self);
+  require_cursor_open(self);
+
+  /* Make sure we talk to the right database. */
+  if (setConnection(self->conn)) return NULL;
+
+  /* per the spec, the cursor should not be useable after calling `close',
+   * so go ahead and free the cursor */
+  doCloseCursor(self, 1);
+
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+
+static int
+Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
+{
+  Connection *conn;
+  char *name = NULL;
+  int rowformat = CURSOR_ROWFORMAT_TUPLE;
+
+  static char* kwdlist[] = { "connection", "name", "rowformat", 0 };
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|si", kwdlist,
+                                   &Connection_type, &conn,
+                                   &name, &rowformat))
+    return -1;
+
+  Py_INCREF(Py_None);
+  self->description = Py_None;
+  self->conn = conn;
+  Py_INCREF(conn);
+  self->state = 0;
+  self->daIn.sqld = 0; self->daIn.sqlvar = 0;
+  self->daOut = 0;
+  self->originalType = 0;
+  self->outputBuffer = 0;
+  self->indIn = 0;
+  self->indOut = 0;
+  self->parmIdx = 0;
+  self->stype = -1;
+  self->op = 0;
+  if (name) {
+    self->cursorName = strdup(name);
+  } else {
+    self->cursorName = malloc(30); /* "some" */
+    sprintf(self->cursorName, "CUR%p", self);
+  }
+  sprintf(self->queryName, "QRY%p", self);
+  memset(self->sqlerrd, 0, sizeof(self->sqlerrd));
+  self->rowcount = -1;
+  self->arraysize = 1;
+  self->messages = PyList_New(0);
+  self->errorhandler = conn->errorhandler;
+  Py_INCREF(self->errorhandler);
+  if (rowformat == CURSOR_ROWFORMAT_DICT) {
+    self->rowformat = CURSOR_ROWFORMAT_DICT;
+  } else {
+    self->rowformat = CURSOR_ROWFORMAT_TUPLE;
+  }
+
+  return 0;
+}
+
+static PyObject* Cursor_iter(Cursor *self)
+{
+  Py_INCREF(self);
+  return (PyObject*)self;
+}
+
+static PyObject* Cursor_iternext(Cursor *self)
+{
+  PyObject *result = Cursor_fetchone(self);
+  if (result == Py_None) {
+    Py_DECREF(result);
+    PyErr_SetNone(PyExc_StopIteration);
+    return NULL;
+  }
+  return result;
+}
+
+static PyObject *Cursor_fetchone(Cursor *self)
+{
+  struct sqlda *tdaOut = self->daOut;
   int i;
 
   EXEC SQL BEGIN DECLARE SECTION;
   char *cursorName;
   EXEC SQL END DECLARE SECTION;
 
-  cursorName = cur->cursorName;
+  cursorName = self->cursorName;
 
-#ifdef STEP1
+  require_cursor_open(self);
+
   /* Make sure we talk to the right database. */
-  if (setConnection(connection(cur->my_conx))) return NULL;
-#endif
+  if (setConnection(self->conn))
+    return NULL;
 
   Py_BEGIN_ALLOW_THREADS;
   EXEC SQL FETCH :cursorName USING DESCRIPTOR tdaOut;
-  for (i=0; i<6; i++) cur->sqlerrd[i] = sqlca.sqlerrd[i];
   Py_END_ALLOW_THREADS;
+  for (i=0; i<6; i++)
+    self->sqlerrd[i] = sqlca.sqlerrd[i];
   if (!strncmp(SQLSTATE, "02", 2)) {
     Py_INCREF(Py_None);
     return Py_None;
+  } else if (strncmp(SQLSTATE, "00", 2)) {
+    ret_on_dberror_cursor(self, "FETCH");
   }
-  else if (strncmp(SQLSTATE, "00", 2)) {
-    cursorError(cur, "FETCH");
-    return 0;
-  }
-  return processOutput(cur);
+  return processOutput(self);
 }
 
-static PyObject *ifxdbFetchCounted(PyObject *self, int count)
+static PyObject *fetchCounted(Cursor *self, int count)
 {
   PyObject *list = PyList_New(0);
 
+  require_cursor_open(self);
+
   while ( count-- > 0 )
   {
-      PyObject *entry = ifxdbCurFetchOne(self, 0);
+      PyObject *entry = Cursor_fetchone(self);
 
       if ( entry == NULL )
       {
@@ -1434,226 +1674,727 @@ static PyObject *ifxdbFetchCounted(PyObject *self, int count)
   return list;
 }
 
-static PyObject *ifxdbCurFetchMany(PyObject *self, PyObject *args)
+static PyObject *Cursor_fetchmany(Cursor *self, PyObject *args, PyObject *kwds)
 {
-  int n_rows = 1;
+  int n_rows = self->arraysize;
 
-  if (!PyArg_ParseTuple(args, "|i", &n_rows))
+  static char* kwdnames[] = { "size", NULL };
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "|i", kwdnames, &n_rows))
       return NULL;
 
-  return ifxdbFetchCounted(self, n_rows);
+  return fetchCounted(self, n_rows);
 }
 
-static PyObject *ifxdbCurFetchAll(PyObject *self, PyObject *args)
+static PyObject *Cursor_fetchall(Cursor *self)
 {
-  return ifxdbFetchCounted(self, INT_MAX);
+  return fetchCounted(self, INT_MAX);
 }
 
-static PyObject *ifxdbCurSetInputSizes(PyObject *self, PyObject *args)
+static PyObject *Cursor_setinputsizes(Cursor *self,
+                                      PyObject *args,
+                                      PyObject *kwds)
 {
+  clear_messages(self);
+  require_cursor_open(self);
+
   Py_INCREF(Py_None);
   return Py_None;
 }
-static PyObject *ifxdbCurSetOutputSize(PyObject *self, PyObject *args)
+
+static PyObject *Cursor_setoutputsize(Cursor *self,
+                                      PyObject *args,
+                                      PyObject *kwds)
 {
+  clear_messages(self);
+  require_cursor_open(self);
+
   Py_INCREF(Py_None);
   return Py_None;
 }
 
-
-static PyMethodDef cursorMethods[] = {
-  { "close", ifxdbCurClose, 1} ,
-  { "execute", ifxdbCurExec, 1} ,
-  { "executemany", ifxdbCurExecMany, 1},
-  { "fetchone", ifxdbCurFetchOne, 1} ,
-  { "fetchmany", ifxdbCurFetchMany, 1} ,
-  { "fetchall", ifxdbCurFetchAll, 1} ,
-  { "setinputsizes", ifxdbCurSetInputSizes, 1} ,
-  { "setoutputsize", ifxdbCurSetOutputSize, 1} ,
-  {0,     0}        /* Sentinel */
-};
-
-static PyObject *cursorGetAttr(PyObject *self,
-                             char *name)
+static PyObject *Cursor_callproc(Cursor *self, PyObject *args, PyObject *kwds)
 {
-  if (!strcmp(name, "description")) {
-    if (cursor(self)->description) {
-      Py_INCREF(cursor(self)->description);
-      return cursor(self)->description;
-    } else {
-      Py_INCREF(Py_None);
-      return Py_None;
+  PyObject *params = 0, *exec_args, *ret = 0;
+  char *func, *p_str = "";
+  static char *kwd_list[] = { "procname", "parameters", 0 };
+
+  clear_messages(self);
+  require_cursor_open(self);
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|O", kwd_list, &func, &params))
+    return NULL;
+
+  if (params) {
+    int p_count, i;
+
+    if (!PySequence_Check(params)) {
+      PyErr_SetString(PyExc_TypeError, "SQL parameters are not a sequence");
+      return NULL;
     }
+
+    p_count = PySequence_Length(params);
+
+    p_str = malloc(p_count * 2);
+
+    /* this will build something like "?,?,?" */
+    for (i = 0; i < p_count; ++i) {
+      p_str[i*2] = '?';
+      p_str[i*2+1] = ',';
+    }
+    p_str[p_count*2-1] = '\0';
   }
-  if (!strcmp(name, "Error")) {
-    Py_INCREF(ifxdbError);
-    return ifxdbError;
+
+  exec_args = Py_BuildValue("(N)",
+                  PyString_FromFormat("EXECUTE PROCEDURE %s(%s)",
+                                      func, p_str));
+  free(p_str);
+  if (params) {
+    _PyTuple_Resize(&exec_args, 2);
+    Py_INCREF(params);
+    PyTuple_SET_ITEM(exec_args, 1, params);
   }
-  if (!strcmp(name, "sqlerrd")) {
-    Py_INCREF(Py_None);
-    return ifxdbCurGetSqlerrd(self, Py_None);
+
+  if (Cursor_execute(self, exec_args, NULL)) {
+    if (!params)
+      params = Py_None;
+    Py_INCREF(params);
+    ret = params;
   }
-  if (!strcmp(name, "rowcount")) {
-    Py_INCREF(Py_None);
-    return ifxdbCurGetRowcount(self, Py_None);
-  }
-  return Py_FindMethod (cursorMethods, self, name);
+  Py_DECREF(exec_args);
+
+  return ret;
 }
 
-static PyObject *ifxdbLogon(PyObject *self, PyObject *args)
+static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
 {
   EXEC SQL BEGIN DECLARE SECTION;
-  char *connectionName;
-  char *connectionString;
-  char *dbUser;
-  char *dbPass;
+  char *connectionName = NULL;
+  char *connectionString = NULL;
+  char *dbUser = NULL;
+  char *dbPass = NULL;
   EXEC SQL END DECLARE SECTION;
-  
-  connectionObject *conn = 0;
-  if (PyArg_ParseTuple(args, "sss", &connectionString, &dbUser, &dbPass)) {
-    conn = PyObject_NEW (connectionObject, &Connection_Type);
-    if (conn) {
-      sprintf(conn->name, "CONN%lX", (unsigned long) conn);
-      connectionName = conn->name;
 
-      Py_BEGIN_ALLOW_THREADS;
-      if (*dbUser && *dbPass) {
-        EXEC SQL CONNECT TO :connectionString AS :connectionName USER :dbUser USING :dbPass WITH CONCURRENT TRANSACTION;
-      }
-      else {
-        EXEC SQL CONNECT TO :connectionString AS :connectionName WITH CONCURRENT TRANSACTION;
-      }
-      Py_END_ALLOW_THREADS;
+  static char* kwd_list[] = { "dsn", "user", "password", 0 };
 
-      if (unsuccessful()) {
-        connectionError(conn, "LOGON");
-        PyMem_DEL(conn);
-        conn = 0;
-      } else {
-        conn->has_commit = (sqlca.sqlwarn.sqlwarn1 == 'W') ;
-        if (conn->has_commit) {
-          EXEC SQL BEGIN WORK;
-          if (unsuccessful()) {
-            connectionError(conn, "BEGIN");
-            PyMem_DEL(conn);
-            conn = 0;
-          }
-        }
-      }
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|ss", kwd_list,
+                                   &connectionString, &dbUser, &dbPass)) {
+    return -1;
+  }
+
+  sprintf(self->name, "CONN%p", self);
+  connectionName = self->name;
+  self->is_open = 0;
+  self->messages = PyList_New(0);
+  self->errorhandler = Py_None;
+  Py_INCREF(self->errorhandler);
+
+  Py_BEGIN_ALLOW_THREADS;
+  if (dbUser && dbPass) {
+    EXEC SQL CONNECT TO :connectionString AS :connectionName USER :dbUser USING :dbPass WITH CONCURRENT TRANSACTION;
+  } else {
+    EXEC SQL CONNECT TO :connectionString AS :connectionName WITH CONCURRENT TRANSACTION;
+  }
+  Py_END_ALLOW_THREADS;
+
+  if (is_dberror(self, NULL, "CONNECT")) {
+    return -1;
+  }
+
+  self->is_open = 1;
+  self->has_commit = (sqlca.sqlwarn.sqlwarn1 == 'W');
+
+  if (self->has_commit) {
+    EXEC SQL BEGIN WORK;
+    if (is_dberror(self, NULL, "BEGIN")) {
+      return -1;
     }
   }
 
-  if (conn)
-    setConnectionName(conn->name);
+  setConnectionName(self->name);
 
-  return (PyObject*) conn;
+  return 0;
 }
 
-static PyMethodDef globalMethods[] = {
-  { "informixdb", ifxdbLogon, 1} ,
-  {0,     0}        /* Sentinel */
-};
-
-static PyObject *InformixError__init__(PyObject *self, PyObject *args);
-static PyObject *InformixError__str__(PyObject *self, PyObject *args);
-static PyMethodDef
-InformixError_methods[] = {
-    { "__str__",    InformixError__str__, METH_VARARGS},
-    { "__init__",    InformixError__init__, METH_VARARGS},
-    { NULL, NULL }
-};
-
-static PyObject *InformixError__str__(PyObject *self, PyObject *args) {
-    self = PyTuple_GetItem(args, 0);
-    return PyObject_GetAttrString(self, "message");
-}
-
-static PyObject *InformixError__init__(PyObject *self, PyObject *args) {
-    int status;
-    PyObject *val;
-    int i,n;
-    char **attr_name;
-    char *attr_names[] = {
-      "message",
-      "sqlcode",
-      "action",
-      "message1",
-#ifdef EXTENDED_ERROR_HANDLING
-      "sqlstate",
-      "message2",
-#endif
-      NULL
-    };
-
-    self = PyTuple_GetItem(args, 0);
-
-    if (!(args = PySequence_GetSlice(args, 1, PySequence_Size(args))))
-        return NULL;
-
-    status = PyObject_SetAttrString(self, "args", args);
-    if (status < 0) {
-        Py_DECREF(args);
-        return NULL;
-    }
-
-    n = PySequence_Size(args);
-    for (i=0, attr_name=attr_names; *attr_name; attr_name++, i++) {
-      if (i>=n) break;
-      val = PySequence_GetItem(args, i);
-      status = PyObject_SetAttrString(self, *attr_name, val);
-      if (status < 0) {
-          Py_DECREF(val);
-          Py_DECREF(args);
-          return NULL;
-      }
-      Py_DECREF(val);
-    }
-
-    Py_DECREF(args);
-    Py_INCREF(Py_None);
-    return Py_None;
-}
-
-/* void initinformixdb() */
-void init_informixdb()
+static PyObject* DatabaseError_init(PyObject* self, PyObject* args, PyObject* kwds)
 {
-  char *env;
-  extern void initdbi();
-  int threadsafety = 0;
-  PyObject *dict = PyDict_New();
-  PyMethodDef *def;
+  static char* kwdnames[] = { "self", "action", "sqlcode", "diagnostics", 0 }; 
+  PyObject *action;
+  PyObject *diags;
+  long int sqlcode;
 
-#ifdef WIN32
-  PyObject *m;
-  Cursor_Type.ob_type = &PyType_Type;
-  Connection_Type.ob_type = &PyType_Type;
-  m = Py_InitModule("_informixdb", globalMethods);
-#else
-  PyObject *m = Py_InitModule("_informixdb", globalMethods);
-#endif
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "OSlO!", kwdnames, &self,
+                                   &action, &sqlcode, &PyList_Type, &diags)) {
+    return NULL;
+  }
 
-  ifxdbError = PyErr_NewException("informixdb.Error", NULL, dict);
-  for (def = InformixError_methods; def->ml_name != NULL; def++) {
-    PyObject *func = PyCFunction_New(def, NULL);
-    PyObject *method = PyMethod_New(func, NULL, ifxdbError);
-    PyDict_SetItemString(dict, def->ml_name, method);
+  if (PyObject_SetAttrString(self, "action", action)) {
+    return NULL;
+  }
+
+  if (PyObject_SetAttrString(self, "sqlcode", PyInt_FromLong(sqlcode))) {
+    return NULL;
+  }
+
+  if (PyObject_SetAttrString(self, "diagnostics", diags)) {
+    return NULL;
+  }
+
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+
+static PyObject* DatabaseError_str(PyObject* self, PyObject* args)
+{
+  PyObject *str, *action, *sqlcode, *diags, *a, *f;
+  int i;
+  self = PyTuple_GetItem(args, 0);
+
+  action = PyObject_GetAttrString(self, "action");
+  sqlcode = PyObject_GetAttrString(self, "sqlcode");
+  diags = PyObject_GetAttrString(self, "diagnostics");
+
+  a = Py_BuildValue("(NN)", sqlcode, action);
+  f = PyString_FromString("SQLCODE %d in %s: \n");
+  str = PyString_Format(f, a);
+  Py_DECREF(f);
+  Py_DECREF(a);
+
+  f = PyString_FromString("%s: %s\n");
+
+  for (i = 0; i < PyList_Size(diags); ++i) {
+    PyObject* d = PyList_GetItem(diags, i);
+    a = Py_BuildValue("(OO)", PyDict_GetItemString(d, "sqlstate"),
+                              PyDict_GetItemString(d, "message"));
+    PyString_ConcatAndDel(&str, PyString_Format(f, a));
+    Py_DECREF(a);
+  }
+
+  Py_DECREF(f);
+
+  return str;
+}
+
+static PyMethodDef DatabaseError_methods[] = {
+  { "__init__", (PyCFunction)DatabaseError_init, METH_VARARGS|METH_KEYWORDS },
+  { "__str__", (PyCFunction)DatabaseError_str, METH_VARARGS },
+  { NULL }
+};
+
+static void setupdb_error(PyObject* exc)
+{
+  PyMethodDef* meth;
+
+  for (meth = DatabaseError_methods; meth->ml_name != NULL; ++meth) {
+    PyObject *func = PyCFunction_New(meth, NULL);
+    PyObject *method = PyMethod_New(func, NULL, exc);
+    PyObject_SetAttrString(exc, meth->ml_name, method);
     Py_DECREF(func);
     Py_DECREF(method);
   }
+}
 
-  PyDict_SetItemString (PyModule_GetDict (m), "Error", ifxdbError);
+typedef struct {
+  PyObject_HEAD
+  PyObject *values;
+} DBAPIType;
+
+/* builds a tuple with which a DatabaseError can be created.
+ *
+ * returns a new reference.
+ */
+static PyObject* dberror_value(char *action)
+{
+  PyObject *list;
+  EXEC SQL BEGIN DECLARE SECTION;
+    int exc_count;
+    char message[255];
+    int messlen;
+    char sqlstate[6];
+    int i;
+  EXEC SQL END DECLARE SECTION;
+
+  list = PyList_New(0);
+  if (!list)
+    return NULL;
+
+  EXEC SQL get diagnostics :exc_count = NUMBER;
+
+  for (i = 1; i <= exc_count; ++i) {
+    PyObject* msg;
+    EXEC SQL get diagnostics exception :i :sqlstate = RETURNED_SQLSTATE,
+               :message = MESSAGE_TEXT, :messlen = MESSAGE_LENGTH;
+    if (!message || messlen < 0 || messlen > sizeof(message)) {
+      /* skip on invalid message */
+      break;
+    }
+    /* recalculate messlen, since it's sometimes wrong (or at least
+       some old comment said so...) */
+    messlen = byleng(message, sizeof(message)-1);
+    message[messlen] = '\0';
+
+    msg = Py_BuildValue("{ssss}", "sqlstate", sqlstate, "message", message);
+    PyList_Append(list, msg);
+    Py_DECREF(msg);
+  }
+
+  return Py_BuildValue("(siN)", action, SQLCODE, list);
+}
+
+/* determines the type of an error by looking at SQLSTATE */
+static PyObject* dberror_type(PyObject *override)
+{
+  if (override) {
+    return override;
+  }
+
+  switch (SQLSTATE[0]) {
+  case '0':
+    switch (SQLSTATE[1]) {
+    case '1': /* 01xxx Success with warning */
+      return ExcWarning;
+    case '2': /* 02xxx No data found or End of data reached */
+      break;
+    case '7': /* 07xxx Dynamic SQL error */
+      return ExcProgrammingError;
+    case '8': /* 08xxx Connection exception */
+      return ExcOperationalError;
+    case 'A': /* 0Axxx Feature not supported */
+      return ExcNotSupportedError;
+    }
+    break;
+  case '2':
+    switch (SQLSTATE[1]) {
+    case '1': /* 21xxx Cardinality violation */
+      return ExcProgrammingError;
+    case '2': /* 22xxx Data error */
+      return ExcDataError;
+    case '3': /* 23000 Integrity-constraint violation */
+      return ExcIntegrityError;
+    case '4': /* 24000 Invalid cursor state */
+    case '5': /* 25000 Invalid transaction state */
+    case 'B': /* 2B000 Dependent priviledge descriptor still exists */
+    case 'D': /* 2D000 Invalid transaction termination */
+      return ExcInternalError;
+    case '6': /* 26000 Invalid SQL statement identifier */
+    case 'E': /* 2E000 Invalid connection name */
+    case '8': /* 28000 Invalid user-authorization specification */
+      return ExcOperationalError;
+    }
+    break;
+  case '3':
+    switch (SQLSTATE[1]) {
+    case '3': /* 33000 Invalid SQL descriptor name */
+    case '4': /* 34000 Invalid cursor name */
+    case '5': /* 35000 Invalid exception number */
+      return ExcOperationalError;
+    case '7': /* 37000 Syntax error or acces violation in ... */
+      return ExcProgrammingError;
+    case 'C': /* 3C000 Duplicate cursor name */
+      return ExcOperationalError;
+    }
+    break;
+  case '4':
+    switch (SQLSTATE[1]) {
+    case '0': /* 40000 Transaction rollback */
+              /* 40003 Statement completion unknown */
+      return ExcOperationalError;
+    case '2': /* 42000 Syntax error or access violation */
+      return ExcProgrammingError;
+    }
+    break;
+  case 'S':
+    switch (SQLSTATE[1]) {
+    case '0': /* S0xxx Invalid name */
+      return ExcProgrammingError;
+    case '1': /* S1000 Memory-allocation error message */
+      return ExcOperationalError;
+    }
+    break;
+  }
+
+  return ExcDatabaseError;
+}
+
+/*
+ * steals a reference to value, but not to type!
+ * returns 0 ... go on; 1 ... exception raised
+ */
+static int error_handle(Connection *connection, Cursor *cursor,
+                        PyObject *type, PyObject *value)
+{
+  PyObject *handler=NULL;
+
+  if (cursor && cursor->errorhandler != Py_None) {
+    handler = cursor->errorhandler;
+  } else if (!cursor && connection && connection->errorhandler != Py_None) {
+    handler = connection->errorhandler;
+  }
+
+  if (handler) {
+    PyObject *args, *hret;
+
+    args = Py_BuildValue("(ONOO)", type, value, (PyObject*)connection,
+                         cursor ? (PyObject*)cursor : Py_None);
+    hret = PyObject_Call(handler, args, NULL);
+    Py_DECREF(args);
+    if (hret) {
+      Py_DECREF(hret);
+      return 0;
+    } else {
+      return 1;
+    }
+  } else {
+    PyObject *msg;
+    msg = Py_BuildValue("(ON)", type, value);
+
+    if (cursor) {
+      PyList_Append(cursor->messages, msg);
+    } else if (connection) {
+      PyList_Append(connection->messages, msg);
+    }
+
+    if (type != ExcWarning) {
+      PyErr_SetObject(type, value);
+      Py_DECREF(msg);
+      return 1;
+    } else {
+      Py_DECREF(msg);
+      return 0;
+    }
+  }
+}
+
+static int
+DBAPIType_init(DBAPIType *self, PyObject *args, PyObject *kwargs)
+{
+  if (!PyArg_ParseTuple(args, "O!", &PyList_Type, &self->values))
+    return -1;
+
+  Py_INCREF(self->values);
+  return 0;
+}
+
+PyObject*
+DBAPIType_richcompare(DBAPIType* self, PyObject* other, int opid)
+{
+  if (opid == Py_EQ || opid == Py_NE) {
+    int r = PySequence_Contains(self->values, other);
+    if (r == -1) /* error occured */
+      return PyInt_FromLong(-1);
+
+    return PyInt_FromLong(opid == Py_EQ ? r == 1 : r == 0);
+  }
+  return PyObject_RichCompare(self->values, other, opid);
+}
+
+PyObject*
+DBAPIType_repr(DBAPIType* self)
+{
+  PyObject *s,*val;
+  char *str;
+
+  val = self->values->ob_type->tp_repr(self->values);
+  if (!val)
+    return NULL;
+  str = PyString_AsString(val);
+
+  s = PyString_FromFormat("DBAPIType(%s)", str);
+  Py_DECREF(val);
+  return s;
+}
+
+PyObject*
+DBAPIType_str(DBAPIType* self)
+{
+  return self->values->ob_type->tp_repr(self->values);
+}
+
+PyDoc_STRVAR(DBAPIType_doc,
+"Helper for comparison with database type names.\n\n\
+Objects of this class will compare equal to a list of database types.\n\
+This is the preferred method to check for a given type in a Cursor's\n\
+description. E.g.:\n\n\
+>>> informixdb.STRING == 'char'\n\
+1\n\
+>>> informixdb.STRING == 'integer'\n\
+0\n\
+>>> cursor.description[0]\n\
+('first', 'char', 25, 25, None, None, 1)\n\
+>>> cursor.description[0][1] == informixdb.STRING\n\
+1");
+
+static PyTypeObject DBAPIType_type = {
+  PyObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type))
+  0,                                  /* ob_size*/
+  "_informixdb.DBAPIType",            /* tp_name */
+  sizeof(DBAPIType),                  /* tp_basicsize */
+  0,                                  /* tp_itemsize */
+  0,                                  /* tp_dealloc */
+  0,                                  /* tp_print */
+  0,                                  /* tp_getattr */
+  0,                                  /* tp_setattr */
+  0,                                  /* tp_compare */
+  (reprfunc)DBAPIType_repr,           /* tp_repr */
+  0,                                  /* tp_as_number */
+  0,                                  /* tp_as_sequence */
+  0,                                  /* tp_as_mapping */
+  0,                                  /* tp_hash */
+  0,                                  /* tp_call */
+  (reprfunc)DBAPIType_str,            /* tp_str */
+  0,                                  /* tp_getattro */
+  0,                                  /* tp_setattro */
+  0,                                  /* tp_as_buffer */
+  Py_TPFLAGS_DEFAULT,                 /* tp_flags */
+  DBAPIType_doc,                      /* tp_doc */
+  0,                                  /* tp_traverse */
+  0,                                  /* tp_clear */
+  (PyObject*(*)(PyObject*,PyObject*,int)) DBAPIType_richcompare, /* tp_richcompare */
+  0,                                  /* tp_weaklistoffset */
+  0,                                  /* tp_iter */
+  0,                                  /* tp_iternext */
+  0,                                  /* tp_methods */
+  0,                                  /* tp_members */
+  0,                                  /* tp_getset */
+  0,                                  /* tp_base */
+  0,                                  /* tp_dict */
+  0,                                  /* tp_descr_get */
+  0,                                  /* tp_descr_set */
+  0,                                  /* tp_dictoffset */
+  (initproc)DBAPIType_init,           /* tp_init */
+  PyType_GenericAlloc,                /* tp_alloc */
+  PyType_GenericNew,                  /* tp_new */
+  _PyObject_Del                       /* tp_free */
+};
+
+static PyObject* dbtp_create(char* types[])
+{
+  char** tp;
+  PyObject *dbtp, *l, *a, *s;
+  l = PyList_New(0);
+  for (tp = types; *tp != NULL; ++tp) {
+    s = PyString_FromString(*tp);
+    PyList_Append(l, s);
+    Py_DECREF(s);
+  }
+  a = Py_BuildValue("(N)", l);
+  dbtp = PyObject_Call((PyObject*)&DBAPIType_type, a, NULL);
+  Py_DECREF(a);
+  return dbtp;
+}
+
+static PyObject* db_Date(PyObject *self, PyObject *args, PyObject *kwds)
+{
+  return PyObject_Call((PyObject*)PyDateTimeAPI->DateType, args, kwds);
+}
+
+static PyObject* db_Time(PyObject *self, PyObject *args, PyObject *kwds)
+{
+  int hour=0, minute=0, second=0, usec=0;
+
+  static char* kwdnames[] = { "hour", "minute", "second", "microsecond", NULL };
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "iii|i", kwdnames,
+                                   &hour, &minute, &second, &usec)) {
+    return NULL;
+  }
+
+  /* 0 isn't allowed as value for year/month/day */
+  return PyDateTime_FromDateAndTime(1,1,1,hour,minute,second,usec);
+}
+
+static PyObject* db_Timestamp(PyObject *self, PyObject *args, PyObject *kwds)
+{
+  return PyObject_Call((PyObject*)PyDateTimeAPI->DateTimeType, args, kwds);
+}
+
+static PyObject* db_DateFromTicks(PyObject *self, PyObject *args)
+{
+  return PyDate_FromTimestamp(args);
+}
+
+static PyObject* db_TimestampFromTicks(PyObject *self, PyObject *args)
+{
+  return PyDateTime_FromTimestamp(args);
+}
+
+static PyObject* db_Binary(PyObject *self, PyObject *args, PyObject *kwds)
+{
+  PyObject *s;
+
+  static char* kwdnames[] = { "string", NULL };
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "S", kwdnames, &s)) {
+    return NULL;
+  }
+
+  return PyBuffer_FromObject(s, 0, Py_END_OF_BUFFER);
+}
+
+static PyObject* db_connect(PyObject *self, PyObject *args, PyObject *kwds)
+{
+  return PyObject_Call((PyObject*)&Connection_type, args, kwds);
+}
+
+PyDoc_STRVAR(db_connect_doc,
+"connect(dsn, [user, password]) -> `Connection`\n\n\
+Establish a connection to a database\n\n\
+`dsn` identifies a database environment as accepted by the CONNECT statement.\n\
+It can be the name of a database ('stores7') the name of a database server\n\
+('@valley) or a combination thereof ('stores7@valley').");
+
+PyDoc_STRVAR(db_Date_doc,
+"Date(year,month,day) -> `datetime.date`\n\n\
+Construct an object holding a date value");
+
+PyDoc_STRVAR(db_Time_doc,
+"Time(hour,minute,second,[microsecond]) -> `datetime.datetime`\n\n\
+Construct an object holding a time value\n\n\
+Note that `microsecond` is an extension to the DB-API specification. It\n\
+represents the fractional part of an Informix DATETIME column, and is\n\
+therefore limited to a maximum of 10 microseconds of accuracy.");
+
+PyDoc_STRVAR(db_Timestamp_doc,
+"Timestamp(year,month,day,[hour,[minute,[second,[microsecond]]]]) -> `datetime.datetime`\n\n\
+Construct an object holding a time stamp (datetime) value\n\n\
+Note that `microsecond` is an extension to the DB-API specification. It\n\
+represents the fractional part of an Informix DATETIME column, and is\n\
+therefore limited to a maximum of 10 microseconds of accuracy.");
+
+PyDoc_STRVAR(db_TimestampFromTicks_doc,
+"TimestampFromTicks(ticks) -> `datetime.datetime`\n\n\
+Construct an object holding a time stamp (datetime) from the given ticks value\n\n\
+`ticks` are the number of seconds since the start of the current epoch\n\
+(1.1.1970 for UNIX).\n\
+Note that using ticks might cause problems, because they cover only a limited\n\
+time range. See the standard Python time and datetime modules' documentation\n\
+for details.");
+
+PyDoc_STRVAR(db_DateFromTicks_doc,
+"DateFromTicks(ticks) -> `datetime.date`\n\n\
+Construct an object holding a date value from the given ticks value\n\n\
+`ticks` are the number of seconds since the start of the current epoch\n\
+(1.1.1970 for UNIX).\n\
+Note that using ticks might cause problems, because they cover only a limited\n\
+time range. See the standard Python time and datetime modules' documentation\n\
+for details.");
+
+PyDoc_STRVAR(db_TimeFromTicks_doc,
+"TimeFromTicks(ticks) -> `datetime.datetime`\n\n\
+Construct an object holding a time value from the given ticks value\n\n\
+`ticks` are the number of seconds since the start of the current epoch\n\
+(1.1.1970 for UNIX).\n\
+Note that using ticks might cause problems, because they cover only a limited\n\
+time range. See the standard Python time and datetime modules' documentation\n\
+for details.");
+
+PyDoc_STRVAR(db_Binary_doc,
+"Binary(string) -> `buffer`\n\n\
+Construct an object capable of holding a binary (long) value");
+
+static PyMethodDef globalMethods[] = {
+  { "connect", (PyCFunction)db_connect, METH_VARARGS|METH_KEYWORDS,
+    db_connect_doc } ,
+  { "Date", (PyCFunction)db_Date, METH_VARARGS|METH_KEYWORDS,
+    db_Date_doc },
+  { "Time", (PyCFunction)db_Time, METH_VARARGS|METH_KEYWORDS,
+    db_Time_doc },
+  { "Timestamp", (PyCFunction)db_Timestamp, METH_VARARGS|METH_KEYWORDS,
+    db_Timestamp_doc },
+  { "TimestampFromTicks", (PyCFunction)db_TimestampFromTicks, METH_VARARGS,
+    db_TimestampFromTicks_doc },
+  { "DateFromTicks", (PyCFunction)db_DateFromTicks, METH_VARARGS,
+    db_DateFromTicks_doc },
+  { "TimeFromTicks", (PyCFunction)db_TimestampFromTicks, METH_VARARGS,
+    db_TimeFromTicks_doc },
+  { "Binary", (PyCFunction)db_Binary, METH_VARARGS|METH_KEYWORDS,
+    db_Binary_doc},
+  { NULL }
+};
+
+PyDoc_STRVAR(_informixdb_doc,
+"DB-API 2.0 compliant database interface for Informix databases.\n\
+\n\
+To get you started while the documentation gets written (don't wait!):\n\
+\n\
+>>> import informixdb\n\
+>>> conn = informixdb.connect('mydatabase')\n\
+>>> cursor = conn.cursor()\n\
+>>> cursor.execute('SELECT * FROM names')\n\
+>>> cursor.fetchall()\n\
+[('donald', 'duck', 34), ('mickey', 'mouse', 23)]\n"
+);
+
+void init_informixdb(void)
+{
+  int threadsafety = 0;
+
+  /* define how sql types should be mapped to dbapi 2.0 types */
+  static char* dbtp_string[] = { "char", "varchar", "nchar",
+                                 "nvarchar", "lvarchar", NULL };
+  static char* dbtp_binary[] = { "byte", "text", NULL };
+  static char* dbtp_number[] = { "smallint", "integer", "float",
+                                 "smallfloat", "decimal", "money", NULL };
+  static char* dbtp_datetime[] = { "date", "datetime", NULL };
+  static char* dbtp_rowid[] = { "serial", NULL };
+
+  PyObject *m = Py_InitModule3("_informixdb", globalMethods, _informixdb_doc);
+
+#define defException(name, base) \
+          Exc##name = PyErr_NewException("_informixdb."#name, base, NULL); \
+          PyModule_AddObject(m, #name, Exc##name);
+  defException(Warning, PyExc_StandardError);
+  setupdb_error(ExcWarning);
+  defException(Error, PyExc_StandardError);
+  defException(InterfaceError, ExcError);
+  defException(DatabaseError, ExcError);
+  setupdb_error(ExcDatabaseError);
+  defException(InternalError, ExcDatabaseError);
+  defException(OperationalError, ExcDatabaseError);
+  defException(ProgrammingError, ExcDatabaseError);
+  defException(IntegrityError, ExcDatabaseError);
+  defException(DataError, ExcDatabaseError);
+  defException(NotSupportedError, ExcDatabaseError);
+#undef defException
+
+  Cursor_type.ob_type = &PyType_Type;
+  Connection_type.ob_type = &PyType_Type;
+  DBAPIType_type.ob_type = &PyType_Type;
+
+  Connection_getseters[0].closure = ExcWarning;
+  Connection_getseters[1].closure = ExcError;
+  Connection_getseters[2].closure = ExcInterfaceError;
+  Connection_getseters[3].closure = ExcDatabaseError;
+  Connection_getseters[4].closure = ExcInternalError;
+  Connection_getseters[5].closure = ExcOperationalError;
+  Connection_getseters[6].closure = ExcProgrammingError;
+  Connection_getseters[7].closure = ExcIntegrityError;
+  Connection_getseters[8].closure = ExcDataError;
+  Connection_getseters[9].closure = ExcNotSupportedError;
+
+  PyType_Ready(&Cursor_type);
+  PyType_Ready(&Connection_type);
+  PyType_Ready(&DBAPIType_type);
 
 #ifdef IFX_THREAD
   threadsafety = 1;
 #endif
-  PyDict_SetItemString (PyModule_GetDict (m), "threadsafety",
-                        Py_BuildValue("i", threadsafety) );
 
-  /* Setting this environment variable to a non-zero value restores
-   * the module's former erroneous handling of NULL outputs. */
-  if (env = getenv("IFXDB_MASK_NULLS"))
-    ifxdbMaskNulls = atoi(env);
+  PyModule_AddIntConstant(m, "threadsafety", threadsafety);
+  PyModule_AddStringConstant(m, "apilevel", "2.0");
+  PyModule_AddStringConstant(m, "paramstyle", "numeric");
 
-  initdbi();
-  /* PyImport_ImportModule("dbi"); */
+  PyModule_AddObject(m, "STRING", dbtp_create(dbtp_string));
+  PyModule_AddObject(m, "BINARY", dbtp_create(dbtp_binary));
+  PyModule_AddObject(m, "NUMBER", dbtp_create(dbtp_number));
+  PyModule_AddObject(m, "DATETIME", dbtp_create(dbtp_datetime));
+  PyModule_AddObject(m, "ROWID", dbtp_create(dbtp_rowid));
+
+  PyModule_AddIntConstant(m, "ROW_AS_TUPLE", CURSOR_ROWFORMAT_TUPLE);
+  PyModule_AddIntConstant(m, "ROW_AS_DICT", CURSOR_ROWFORMAT_DICT);
+
+  Py_INCREF(&Connection_type);
+  PyModule_AddObject(m, "Connection", (PyObject*)&Connection_type);
+  Py_INCREF(&Cursor_type);
+  PyModule_AddObject(m, "Cursor", (PyObject*)&Cursor_type);
+
+  PyDateTime_IMPORT;
 }

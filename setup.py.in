@@ -1,11 +1,35 @@
+import sys
 from distutils.core import setup, Extension
-from string import split
+from distutils.sysconfig import get_python_inc
+from distutils.util import get_platform
+
 esql_libs = "@ESQLLIBS@"
 esql_defs = "@ESQLDEFS@"
 
+def have_c_datetime():
+    """ Check whether the datetime C API is available. """
+    v = sys.version_info
+    if sys.version_info[0] > 2:
+        return 1
+    elif sys.version_info[0] == 2 and sys.version_info[1] >= 4:
+        return 1
+    else:
+        return 0
+
 extra_libs = []
 extra_objs = []
-extra_macros = [('STEP1',None), ('EXTENDED_ERROR_HANDLING',None)]
+extra_macros = [('PYTHON_INCLUDE', get_python_inc(plat_specific=1)),
+                ('HAVE_C_DATETIME', have_c_datetime())]
+
+modules = [ 'informixdb' ]
+# If we don't have a datetime module available, install ours
+saved_path = sys.path
+try:
+    sys.path = sys.path[1:]
+    import datetime
+except:
+    modules.append('datetime')
+sys.path = saved_path
 
 for x in esql_libs.split(" "):
   if x[0:2]=="-l": extra_libs.append(x[2:])
@@ -14,8 +38,13 @@ for x in esql_libs.split(" "):
 for x in esql_defs.split(" "):
   if len(x)>0: extra_macros.append((x,None))
 
+# On AIX we need to define _H_LOCALEDEF, so that the system's
+# loc_t doesn't conflict with Informix' loc_t for BLOBs
+if get_platform().startswith('aix-'):
+  extra_macros.append(('_H_LOCALEDEF', None))
+
 module1 = Extension('_informixdb',
-                    sources = ['ext/_informixdb.c','ext/dbi.c'],
+                    sources = ['ext/_informixdb.c'],
                     include_dirs = ['ext','@INFORMIXDIR@/incl/esql'],
                     library_dirs = ['@INFORMIXDIR@/lib',
                                     '@INFORMIXDIR@/lib/esql'],
@@ -26,5 +55,5 @@ module1 = Extension('_informixdb',
 setup (name = 'InformixDB',
        version = '1.4',
        description = 'InformixDB v1.4',
-       py_modules = ['informixdb'],
+       py_modules = modules,
        ext_modules = [module1])

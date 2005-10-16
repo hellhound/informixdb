@@ -18,7 +18,7 @@ class build_ext(_build_ext):
         '[ESQL/C] statically link against ESQL/C libraries')
         ]
 
-    boolean_options = [ 'esql_static' ]
+    boolean_options = [ 'esql-static' ]
 
     def initialize_options(self):
         _build_ext.initialize_options(self)
@@ -92,9 +92,6 @@ class build_ext(_build_ext):
                 ext.sources[ext.sources.index(file)] = file[:-3]+'.c'
 
         _build_ext.build_extension(self, ext)
-
-    def _esql_preprocess(file):
-        return cfile
 
 def have_c_datetime():
     """ Check whether the datetime C API is available. """

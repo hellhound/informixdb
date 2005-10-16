@@ -99,6 +99,62 @@ static PyObject *ExcIntegrityError;
 static PyObject *ExcDataError;
 static PyObject *ExcNotSupportedError;
 
+PyDoc_STRVAR(ExcWarning_doc,
+"Exception raised for SQL warnings.\n\n\
+The value of ``SQLSTATE`` is used to determine if a particular errorcode\n\
+should be treated as `Warning`.\n\n\
+:Note: The default `Connection.errorhandler`/`Cursor.errorhandler` never\n\
+       actually raises this exception, it is only present in the \n\
+       `Connection.messages`/`Cursor.messages` list.\n\n\
+:Note: Some warnings (e.g. data truncation) are only generated for an ANSI\n\
+       compatible database.");
+
+PyDoc_STRVAR(ExcError_doc,
+"Exception that servers as base for all Informix DB exceptions except for `Warning`.");
+
+PyDoc_STRVAR(ExcInterfaceError_doc,
+"Exception raised for errors in the database interface.\n\n\
+This exception is currently raised when trying to use a closed `Connection`\n\
+`Cursor`, when too few or too many parameters are passed to `Cursor.execute`\n\
+or when a (internal) datetime conversion error occurs.");
+
+PyDoc_STRVAR(ExcDatabaseError_doc,
+"Exception raised for errors related to the database.\n\n\
+This exception serves as base class for more specific database errors and\n\
+as catchall for database errors which don't fit into any other category.\n\n\
+Informix DB uses ``SQLSTATE`` classes to map database errors to specific\n\
+exception classes. In some cases however the database doesn't provide\n\
+useful values for the error class and Informix DB falls back to `DatabaseError`.");
+
+PyDoc_STRVAR(ExcInternalError_doc,
+"Exception raised for errors internal to the database.\n\n\
+This exception is raised for invalid cursor or transaction states.");
+
+PyDoc_STRVAR(ExcOperationalError_doc,
+"Exception raised for operational database errors that aren't necessarily\
+under the programmer's control.\n\n\
+Raised for connection problems, situations where the database runs out\n\
+of memory or when the given credentials don't allow access to the database.");
+
+PyDoc_STRVAR(ExcProgrammingError_doc,
+"Exception raised for errors caused by the program.\n\n\
+Raised e.g. when an invalid table is referenced, a syntax error occurs or\n\
+an SQL statement is invalid.");
+
+PyDoc_STRVAR(ExcIntegrityError_doc,
+"Exception raised when an integrity constraint would be violated.");
+
+PyDoc_STRVAR(ExcDataError_doc,
+"Exception raised for errors that occur due to the processed data.\n\n\
+Raised e.g. for a division by zero error or when a numeric value is out\n\
+of range.");
+
+PyDoc_STRVAR(ExcNotSupportedError_doc,
+"Exception raised when a missing or not supported feature is being used.\n\n\
+Raised when trying to rollback a transaction on a database which doesn't\n\
+support transactions or when the database doesn't support a particular feature\n\
+(e.g. VARCHARs or BYTE/TEXT types on Informix SE).");
+
 /* Checks for occurance of database errors and handles them.
  * Evaluates to 1 to indicate that an exception was raised, or to 0
  * otherwise
@@ -290,20 +346,21 @@ static PyObject *Connection_rollback(Connection *self);
 static PyObject *Connection_close(Connection *self);
 
 PyDoc_STRVAR(Connection_cursor_doc,
-"cursor([name],[rowformat=informixdb.ROW_AS_TUPLE]) -> `Cursor`\n\n\
+"cursor([name=None,rowformat=informixdb.ROW_AS_TUPLE]) -> Cursor\n\n\
 Return a new `Cursor` object using the connection.\n\
-\n\
+\n\n\
 `name` is an extension to the DB-API 2.0 specification and allows you to\n\
 optionally name your cursor. This is only useful when the cursor is going\n\
-to be used in 'WHERE CURRENT OF <name>' clauses in SQL statements.\n\
+to be used in ``'WHERE CURRENT OF <name>'`` clauses in SQL statements.\n\
 Note however, that you will have to use a second `Cursor` object to perform\n\
-the operation, since trying to execute the '... WHERE CURRENT OF ...' statement\n\
+the operation, since trying to execute the ``'... WHERE CURRENT OF ...'`` statement\n\
 with the named `Cursor` object itself will close it.\n\
 \n\
 `rowformat` is an extension to the DB-API 2.0 specification that can be used\n\
 to specify that dictionaries with the column names as keys should be used as\n\
-return values of `fetchone`, `fetchmany` and `fetchall` instead of tuples.\n\
-To select this behaviour use `informixdb.ROW_AS_DICT` for `row_format`, e.g.:\n\
+return values of `Cursor.fetchone`, `Cursor.fetchmany` and `Cursor.fetchall`\n\
+instead of tuples. To select this behaviour use `informixdb.ROW_AS_DICT` for\n\
+`rowformat`, e.g.:\n\
 \n\
 >>> cursor = conn.cursor(rowformat=informixdb.ROW_AS_DICT)\n\
 >>> cursor.execute('SELECT * FROM names')\n\
@@ -313,19 +370,19 @@ To select this behaviour use `informixdb.ROW_AS_DICT` for `row_format`, e.g.:\n\
 
 PyDoc_STRVAR(Connection_commit_doc,
 "commit()\n\n\
-Commit the current database transaction and start a new one\n\n\
+Commit the current database transaction and start a new one.\n\n\
 `commit` does nothing for databases which have transactions disabled.");
 
 PyDoc_STRVAR(Connection_rollback_doc,
 "rollback()\n\n\
-Rollback the current database transaction and start a new one\n\n\
+Rollback the current database transaction and start a new one.\n\n\
 `rollback` raises a NotSupportedError for databases which have transactions\n\
 disabled");
 
 PyDoc_STRVAR(Connection_close_doc,
 "close()\n\n\
-Close the connection and all associated `Cursor` objects\n\n\
-This is automatically when the `Connection` object and all its associated\n\
+Close the connection and all associated `Cursor` objects.\n\n\
+This is automatically done when the `Connection` object and all its associated\n\
 cursors are destroyed.\n\n\
 After the connection is closed it becomes unusable and all operations on it\n\
 or its associated `Cursor` objects will raise an InterfaceError.\n\n\
@@ -346,21 +403,21 @@ static PyMethodDef Connection_methods[] = {
 };
 
 PyDoc_STRVAR(Connection_messages_doc,
-"A list with one (exception_class, exception_values) tuple for each error/warning\n\n\
+"A list with one ``(exception_class, exception_values)`` tuple for each error/warning.\n\n\
 The default `errorhandler` appends any warnings or errors concerning the\n\
 connection to this list. The list is automatically cleared by all connection\n\
-methods and can be manually cleared by the user with 'del connection.messages[:]'.\n\n\
+methods and can be manually cleared by the user with ``del connection.messages[:]``.\n\n\
 The purpose of these list is to eliminate the need to raise Warning exceptions.\n\n\
-Note that this is an extension to the DB API 2.0 specification.");
+:Note: This is an extension to the DB-API 2.0 specification.");
 
 PyDoc_STRVAR(Connection_errorhandler_doc,
-"An optional callable which can be used to customize error reporting\n\n\
+"An optional callable which can be used to customize error reporting.\n\n\
 `errorhandler` can be set to a callable of the form\n\
-errorhandler(connection, cursor, errorclass, errorvalue) and will be\n\
+``errorhandler(connection, cursor, errorclass, errorvalue)`` and will be\n\
 called for any errors or warnings concerning the connection.\n\n\
 The default (if errorhandler is None) is to append the error/warning to the\n\
 `messages` list and raise an exception unless the errorclass is `Warning`.\n\n\
-Note that this is an extension to the DB-API 2.0 specification.");
+:Note: This is an extension to the DB-API 2.0 specification.");
 
 static PyMemberDef Connection_members[] = {
   { "messages", T_OBJECT_EX, offsetof(Connection, messages), READONLY,
@@ -378,38 +435,38 @@ static PyObject *Connection_getexception(PyObject* self, PyObject* exc)
 
 static PyGetSetDef Connection_getseters[] = {
   { "Warning", (getter)Connection_getexception, NULL,
-    NULL, DEFERRED_ADDRESS(ExcWarning) },
+    ExcWarning_doc, DEFERRED_ADDRESS(ExcWarning) },
   { "Error", (getter)Connection_getexception, NULL,
-    NULL, DEFERRED_ADDRESS(ExcError) },
+    ExcError_doc, DEFERRED_ADDRESS(ExcError) },
   { "InterfaceError", (getter)Connection_getexception, NULL,
-    NULL, DEFERRED_ADDRESS(ExcInterfaceError) },
+    ExcInterfaceError_doc, DEFERRED_ADDRESS(ExcInterfaceError) },
   { "DatabaseError", (getter)Connection_getexception, NULL,
-    NULL, DEFERRED_ADDRESS(ExcDatabaseError) },
+    ExcDatabaseError_doc, DEFERRED_ADDRESS(ExcDatabaseError) },
   { "InternalError", (getter)Connection_getexception, NULL,
-    NULL, DEFERRED_ADDRESS(ExcInternalError) },
+    ExcInternalError_doc, DEFERRED_ADDRESS(ExcInternalError) },
   { "OperationalError", (getter)Connection_getexception, NULL,
-    NULL, DEFERRED_ADDRESS(ExcOperationalError) },
+    ExcOperationalError_doc, DEFERRED_ADDRESS(ExcOperationalError) },
   { "ProgrammingError", (getter)Connection_getexception, NULL,
-    NULL, DEFERRED_ADDRESS(ExcProgrammingError) },
+    ExcProgrammingError_doc, DEFERRED_ADDRESS(ExcProgrammingError) },
   { "IntegrityError", (getter)Connection_getexception, NULL,
-    NULL, DEFERRED_ADDRESS(ExcIntegrityError) },
+    ExcIntegrityError_doc, DEFERRED_ADDRESS(ExcIntegrityError) },
   { "DataError", (getter)Connection_getexception, NULL,
-    NULL, DEFERRED_ADDRESS(ExcDataError) },
+    ExcDataError_doc, DEFERRED_ADDRESS(ExcDataError) },
   { "NotSupportedError", (getter)Connection_getexception, NULL,
-    NULL, DEFERRED_ADDRESS(ExcNotSupportedError) },
+    ExcNotSupportedError_doc, DEFERRED_ADDRESS(ExcNotSupportedError) },
   { NULL }
 };
 
 PyDoc_STRVAR(Connection_doc,
-"Connection to an Informix database\n\n\
+"Connection to an Informix database.\n\n\
 Provides access to transactions and allows the creation of Cursor objects\n\
 via the `cursor` method.\n\n\
 As an extension to the DB-API 2.0 specification Informix DB provides the\n\
 exception classes as attributes of `Connection` objects in addition to the\n\
 module level attributes to simplify error handling in multi-connection\n\
 environments.\n\n\
-Note: You should never directly instantiate a `Connection` object, use the\n\
-modules' `connect` method instead.");
+:Note: Do not instantiate objects of this class directly. Use \
+the `informixdb.connect` method instead.");
 
 static PyTypeObject Connection_type = {
   PyObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type))
@@ -2235,32 +2292,32 @@ static PyObject* db_connect(PyObject *self, PyObject *args, PyObject *kwds)
 }
 
 PyDoc_STRVAR(db_connect_doc,
-"connect(dsn, [user, password]) -> `Connection`\n\n\
-Establish a connection to a database\n\n\
+"connect(dsn[,user,password]) -> Connection\n\n\
+Establish a connection to a database.\n\n\
 `dsn` identifies a database environment as accepted by the CONNECT statement.\n\
-It can be the name of a database ('stores7') the name of a database server\n\
-('@valley) or a combination thereof ('stores7@valley').");
+It can be the name of a database (``'stores7'``) the name of a database server\n\
+(``'@valley'``) or a combination thereof (``'stores7@valley'``).");
 
 PyDoc_STRVAR(db_Date_doc,
-"Date(year,month,day) -> `datetime.date`\n\n\
+"Date(year,month,day) -> datetime.date\n\n\
 Construct an object holding a date value");
 
 PyDoc_STRVAR(db_Time_doc,
-"Time(hour,minute,second,[microsecond]) -> `datetime.datetime`\n\n\
+"Time(hour,minute,second[,microsecond=0]) -> datetime.datetime\n\n\
 Construct an object holding a time value\n\n\
 Note that `microsecond` is an extension to the DB-API specification. It\n\
 represents the fractional part of an Informix DATETIME column, and is\n\
 therefore limited to a maximum of 10 microseconds of accuracy.");
 
 PyDoc_STRVAR(db_Timestamp_doc,
-"Timestamp(year,month,day,[hour,[minute,[second,[microsecond]]]]) -> `datetime.datetime`\n\n\
+"Timestamp(year,month,day,hour=0,minute=0,second=0,microsecond=0) -> datetime.datetime\n\n\
 Construct an object holding a time stamp (datetime) value\n\n\
 Note that `microsecond` is an extension to the DB-API specification. It\n\
 represents the fractional part of an Informix DATETIME column, and is\n\
 therefore limited to a maximum of 10 microseconds of accuracy.");
 
 PyDoc_STRVAR(db_TimestampFromTicks_doc,
-"TimestampFromTicks(ticks) -> `datetime.datetime`\n\n\
+"TimestampFromTicks(ticks) -> datetime.datetime\n\n\
 Construct an object holding a time stamp (datetime) from the given ticks value\n\n\
 `ticks` are the number of seconds since the start of the current epoch\n\
 (1.1.1970 for UNIX).\n\
@@ -2269,7 +2326,7 @@ time range. See the standard Python time and datetime modules' documentation\n\
 for details.");
 
 PyDoc_STRVAR(db_DateFromTicks_doc,
-"DateFromTicks(ticks) -> `datetime.date`\n\n\
+"DateFromTicks(ticks) -> datetime.date\n\n\
 Construct an object holding a date value from the given ticks value\n\n\
 `ticks` are the number of seconds since the start of the current epoch\n\
 (1.1.1970 for UNIX).\n\
@@ -2278,7 +2335,7 @@ time range. See the standard Python time and datetime modules' documentation\n\
 for details.");
 
 PyDoc_STRVAR(db_TimeFromTicks_doc,
-"TimeFromTicks(ticks) -> `datetime.datetime`\n\n\
+"TimeFromTicks(ticks) -> datetime.datetime\n\n\
 Construct an object holding a time value from the given ticks value\n\n\
 `ticks` are the number of seconds since the start of the current epoch\n\
 (1.1.1970 for UNIX).\n\
@@ -2287,7 +2344,7 @@ time range. See the standard Python time and datetime modules' documentation\n\
 for details.");
 
 PyDoc_STRVAR(db_Binary_doc,
-"Binary(string) -> `buffer`\n\n\
+"Binary(string) -> buffer\n\n\
 Construct an object capable of holding a binary (long) value");
 
 static PyMethodDef globalMethods[] = {
@@ -2339,8 +2396,12 @@ void init_informixdb(void)
   PyObject *m = Py_InitModule3("_informixdb", globalMethods, _informixdb_doc);
 
 #define defException(name, base) \
-          Exc##name = PyErr_NewException("_informixdb."#name, base, NULL); \
-          PyModule_AddObject(m, #name, Exc##name);
+          do { \
+            PyObject* d = Py_BuildValue("{ss}", "__doc__", Exc##name##_doc); \
+            Exc##name = PyErr_NewException("_informixdb."#name, base, d); \
+            Py_DECREF(d); \
+            PyModule_AddObject(m, #name, Exc##name); \
+          } while(0);
   defException(Warning, PyExc_StandardError);
   setupdb_error(ExcWarning);
   defException(Error, PyExc_StandardError);
@@ -2381,6 +2442,7 @@ void init_informixdb(void)
   PyModule_AddIntConstant(m, "threadsafety", threadsafety);
   PyModule_AddStringConstant(m, "apilevel", "2.0");
   PyModule_AddStringConstant(m, "paramstyle", "numeric");
+  PyModule_AddStringConstant(m, "__docformat__", "restructuredtext en");
 
   PyModule_AddObject(m, "STRING", dbtp_create(dbtp_string));
   PyModule_AddObject(m, "BINARY", dbtp_create(dbtp_binary));

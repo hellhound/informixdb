@@ -67,13 +67,13 @@ class build_ext(_build_ext):
 
         if self.include_dirs is None:
             self.include_dirs = []
-        self.include_dirs = [ '/usr/local/informix/incl/esql' ] \
+        self.include_dirs = [ self.esql_informixdir+'/incl/esql' ] \
                             + self.include_dirs
 
         if self.library_dirs is None:
             self.library_dirs = []
-        self.library_dirs += [ '/usr/local/informix/lib/esql',
-                               '/usr/local/informix/lib' ]
+        self.library_dirs += [ self.esql_informixdir+'/lib/esql',
+                               self.esql_informixdir+'/lib' ]
 
     def build_extension(self, ext):
         # preprocess *.ec files with 'esql'

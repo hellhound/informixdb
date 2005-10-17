@@ -131,7 +131,7 @@ PyDoc_STRVAR(ExcInternalError_doc,
 This exception is raised for invalid cursor or transaction states.");
 
 PyDoc_STRVAR(ExcOperationalError_doc,
-"Exception raised for operational database errors that aren't necessarily\
+"Exception raised for operational database errors that aren't necessarily \
 under the programmer's control.\n\n\
 Raised for connection problems, situations where the database runs out\n\
 of memory or when the given credentials don't allow access to the database.");
@@ -238,16 +238,139 @@ static PyObject* Cursor_iter(Cursor *self);
 static PyObject* Cursor_iternext(Cursor *self);
 static PyObject *Cursor_getsqlerrd(Cursor *self, void *closure);
 
+PyDoc_STRVAR(Cursor_close_doc,
+"close()\n\n\
+Close the cursor now.\n\n\
+The cursor will be unusable from this point forward. Any operations on it\n\
+will raise an `InterfaceError`");
+
+PyDoc_STRVAR(Cursor_execute_doc,
+"execute(operation [,seq_of_parameters])\n\n\
+Execute an arbitrary SQL statement.\n\n\
+`operation` is a string containing the SQL statements with optional\n\
+placeholders, where either ``qmark``-style (``SELECT * FROM names WHERE name = ?``)\n\
+or ``numeric``-style (``SELECT * FROM names WHERE name = :1``) can be used.\n\
+\n\
+`seq_of_parameters` is a sequence of values to be bound to the placeholders in\n\
+the SQL statement. The number of values in the sequence must match the number\n\
+of parameters required by the SQL statement exactly. The types which are used\n\
+for binding are automatically derived from the Python types. For strings and\n\
+integers this is straightforward. To be able to bind date, time and binary\n\
+(``BYTE``/``TEXT``) values the module provides the constructors `Date`,\n\
+`Time`, `Timestamp`, `Binary` and some more to construct date and time\n\
+values from UNIX ticks.\n\n\
+Be careful when trying to pass in a single string for `seq_of_parameters`,\n\
+because it would be interpreted as a sequence. To get what is most likely\n\
+the desired effect you have to wrap it in a tuple, e.g.:\n\
+\n\
+>>> cursor.execute('SELECT * FROM names WHERE first = :1', 'donald')\n\
+Traceback (most recent call last):\n\
+  File \"<stdin>\", line 1, in ?\n\
+_informixdb.InterfaceError: too many actual parameters\n\
+>>> cursor.execute('SELECT * FROM names WHERE first = :1', ('donald',))\n\
+\n\
+:Note: Informix DB implements the operation-caching optimization. This\n\
+       means that passing the same operation object to the same `Cursor`\n\
+       object's `execute` method multiple times in a row will prepare the\n\
+       statement only once. This may result in a significant improvement in\n\
+       execution speed when the same statement is executed many times with\n\
+       different parameters.\n\
+\n\
+:Returns: `execute` will return the number of affected rows for statements\n\
+          which modify data, ``-1`` where the number of affected rows cannot\n\
+          be determined or `None` for statements which return a result set.\n\
+          As the behaviour of the return value is not specified in the DB-API 2.0\n\
+          specification you are best advised using `rowcount` to determine\n\
+          the number of affected rows, as this will provide the same information\n\
+          in a standards compliant way.");
+
+PyDoc_STRVAR(Cursor_executemany_doc,
+"executemany(operation, seq_of_parameters)\n\n\
+Execute an arbitrary SQL statement multiple times using different parameters.\n\n\
+The `operation` parameter is the same as for `execute`, `seq_of_parameters` is a\n\
+sequence of parameter tuples (or more generally sequences) suitable for passing\n\
+to `execute`. This will invoke `execute` for all parameter sequences in\n\
+`seq_of_parameters`, but will still be fast since the operation is prepared only\n\
+once.\n\n\
+For batch inserts a special optimization applies, which will make use of\n\
+insert cursors. This can result in a huge speed increase compared to calling\n\
+`execute` multiple times, especially when used over a network.\n\
+\n\
+:Seealso: `execute`");
+
+PyDoc_STRVAR(Cursor_fetchone_doc,
+"fetchone() -> sequence\n\n\
+Fetch the next row of a query result set.\n\n\
+The next row is returned either as sequence or as mapping, depending on how\n\
+the `Cursor` was created (see `Connection.cursor`). When no more rows are\n\
+are available `None` is returned.\n\n\
+Calling `fetchone` when no statement was executed or after a statement that\n\
+does not produce a result set was executed will raise an Error.");
+
+PyDoc_STRVAR(Cursor_fetchmany_doc,
+"fetchmany([size=Cursor.arraysize]) -> list\n\n\
+Fetch a specified number of rows of a query result set.\n\n\
+Return up to `size` rows in a list, or fewer if there are no more rows\n\
+available. An empty list is returned if no row is available.\n\
+\n\
+The types of the rows and the behaviour in error cases is the same as for\n\
+`fetchone`.");
+
+PyDoc_STRVAR(Cursor_fetchall_doc,
+"fetchall() -> list\n\n\
+Fetch all (remaining) rows of a query result set.\n\n\
+Return as many rows as there are available in the result set or an\n\
+empty list if there are no more rows available.\n\
+\n\
+The types of the rows and the behaviour in error cases is the same as for\n\
+`fetchone`.");
+
+PyDoc_STRVAR(Cursor_setinputsizes_doc,
+"setinputsizes(sizes)\n\n\
+Provide hints to optimize memory allocation for input parameters.\n\n\
+Informix DB does not implement this optimization.");
+
+PyDoc_STRVAR(Cursor_setoutputsize_doc,
+"setoutputsize(size[,column])\n\n\
+Provide hints to optimize memory allocation for large output values.\n\n\
+Informix DB does not implement this optimization.");
+
+PyDoc_STRVAR(Cursor_callproc_doc,
+"callproc(procname[,parameters]) -> sequence\n\n\
+Execute a stored procedure.\n\n\
+Call the stored procedure `procname` with parameters as given in the sequence\n\
+`parameters`. This is preferable to `execute` with an ``EXECUTE PROCEDURE ...``\n\
+statement in most cases, because it should also work with other DB-API 2.0\n\
+implementations.\n\
+\n\
+If the stored procedure generates a result set it can be accessed through the\n\
+standard fetch methods.\n\
+\n\
+:Returns: The unmodified input sequence, because Informix doesn't support ``out``\n\
+          or ``in/out`` arguments on stored procedures (the specification says\n\
+          that a copy of the input sequence should be returned, where ``out``\n\
+          and ``in/out`` arguments are replaced by their new values).\n\
+");
+
 static PyMethodDef Cursor_methods[] = {
-  { "close", (PyCFunction)Cursor_close, METH_NOARGS},
-  { "execute", (PyCFunction)Cursor_execute, METH_VARARGS|METH_KEYWORDS},
-  { "executemany", (PyCFunction)Cursor_executemany, METH_VARARGS|METH_KEYWORDS},
-  { "fetchone", (PyCFunction)Cursor_fetchone, METH_NOARGS},
-  { "fetchmany", (PyCFunction)Cursor_fetchmany, METH_VARARGS|METH_KEYWORDS},
-  { "fetchall", (PyCFunction)Cursor_fetchall, METH_NOARGS},
-  { "setinputsizes", (PyCFunction)Cursor_setinputsizes, METH_VARARGS|METH_KEYWORDS},
-  { "setoutputsize", (PyCFunction)Cursor_setoutputsize, METH_VARARGS|METH_KEYWORDS},
-  { "callproc", (PyCFunction)Cursor_callproc, METH_VARARGS|METH_KEYWORDS},
+  { "close", (PyCFunction)Cursor_close, METH_NOARGS,
+    Cursor_close_doc },
+  { "execute", (PyCFunction)Cursor_execute, METH_VARARGS|METH_KEYWORDS,
+    Cursor_execute_doc },
+  { "executemany", (PyCFunction)Cursor_executemany, METH_VARARGS|METH_KEYWORDS,
+    Cursor_executemany_doc },
+  { "fetchone", (PyCFunction)Cursor_fetchone, METH_NOARGS,
+    Cursor_fetchone_doc },
+  { "fetchmany", (PyCFunction)Cursor_fetchmany, METH_VARARGS|METH_KEYWORDS,
+    Cursor_fetchmany_doc },
+  { "fetchall", (PyCFunction)Cursor_fetchall, METH_NOARGS,
+    Cursor_fetchall_doc },
+  { "setinputsizes", (PyCFunction)Cursor_setinputsizes, METH_VARARGS|METH_KEYWORDS,
+    Cursor_setinputsizes_doc },
+  { "setoutputsize", (PyCFunction)Cursor_setoutputsize, METH_VARARGS|METH_KEYWORDS,
+    Cursor_setoutputsize_doc },
+  { "callproc", (PyCFunction)Cursor_callproc, METH_VARARGS|METH_KEYWORDS,
+    Cursor_callproc_doc },
   { NULL }
 };
 
@@ -273,8 +396,31 @@ static PyGetSetDef Cursor_getseters[] = {
   { NULL }
 };
 
-static char Cursor_doc[] =
-"Executes SQL statements and fetches their results";
+PyDoc_STRVAR(Cursor_doc,
+"Executes SQL statements and fetches their results.\n\n\
+`Cursor` objects are the central objects in interacting with the database\n\
+since they provide the methods necessary to execute SQL statements and fetch\n\
+results from the database.\n\
+\n\
+To create a `Cursor` object call `Connection.cursor`.\n\
+\n\
+You can then use the `execute`, `executemany` and `callproc` methods to issue\n\
+SQL statements and get their results with `fetchone`, `fetchmany`, `fetchall`\n\
+or by iterating over the `Cursor` object.\n\
+\n\
+:Note: Iterating over a `Cursor` object is an extension to the DB-API 2.0\n\
+       specification.\n\
+\n\
+:Note: As an extension to the DB-API 2.0 specification Informix DB provides\n\
+       named cursors which allow you to use the ``... WHERE CURRENT OF ...``\n\
+       clause in your SQL statements. For information on how to use them see\n\
+       the `Connection.cursor` documentation.\n\
+\n\
+:Note: `Cursor` objects do not directly map to underlying database cursors.\n\
+       Actual database cursors are created in `execute`, `executemany` or\n\
+       `callproc` when needed (i.e. for ``SELECT`` and ``EXECUTE PROCEDURE``\n\
+       statements) and closed upon the next invocation of `execute`,\n\
+       `executemany` or `callproc` or when the `Cursor` object is deallocated.");
 
 static PyTypeObject Cursor_type = {
   PyObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type))
@@ -2377,8 +2523,12 @@ To get you started while the documentation gets written (don't wait!):\n\
 >>> cursor = conn.cursor()\n\
 >>> cursor.execute('SELECT * FROM names')\n\
 >>> cursor.fetchall()\n\
-[('donald', 'duck', 34), ('mickey', 'mouse', 23)]\n"
-);
+[('donald', 'duck', 34), ('mickey', 'mouse', 23)]\n\
+\n\
+:Note: Informix DB uses the `datetime` module to represent date, time and\n\
+       timestamp values. It is part of the standard library since\n\
+       Python 2.3 and is automatically installed by Informix DB for older\n\
+       Python versions.");
 
 void init_informixdb(void)
 {

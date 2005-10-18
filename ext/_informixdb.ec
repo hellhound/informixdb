@@ -39,7 +39,7 @@
 #include <ctype.h>
 #undef loc_t
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <value.h>
 #include <sqlproto.h>
 #else
@@ -268,8 +268,8 @@ Traceback (most recent call last):\n\
   File \"<stdin>\", line 1, in ?\n\
 _informixdb.InterfaceError: too many actual parameters\n\
 >>> cursor.execute('SELECT * FROM names WHERE first = :1', ('donald',))\n\
-\n\
-:Note: Informix DB implements the operation-caching optimization. This\n\
+\n"
+":Note: Informix DB implements the operation-caching optimization. This\n\
        means that passing the same operation object to the same `Cursor`\n\
        object's `execute` method multiple times in a row will prepare the\n\
        statement only once. This may result in a significant improvement in\n\

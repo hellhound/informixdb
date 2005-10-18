@@ -101,59 +101,64 @@ static PyObject *ExcNotSupportedError;
 
 PyDoc_STRVAR(ExcWarning_doc,
 "Exception raised for SQL warnings.\n\n\
-The value of ``SQLSTATE`` is used to determine if a particular errorcode\n\
-should be treated as `Warning`.\n\n\
-:Note: The default `Connection.errorhandler`/`Cursor.errorhandler` never\n\
-       actually raises this exception, it is only present in the \n\
-       `Connection.messages`/`Cursor.messages` list.\n\n\
-:Note: Some warnings (e.g. data truncation) are only generated for an ANSI\n\
-       compatible database.");
+The value of ``SQLSTATE`` is used to determine if a particular\n\
+errorcode should be treated as `Warning`.\n\n\
+:Note: The default `Connection.errorhandler`/`Cursor.errorhandler`\n\
+       never actually raises this exception, it is only present\n\
+       in the `Connection.messages`/`Cursor.messages` list.\n\n\
+:Note: Some warnings (e.g. data truncation) are only generated for\n\
+       an ANSI compatible database.");
 
 PyDoc_STRVAR(ExcError_doc,
-"Exception that servers as base for all Informix DB exceptions except for `Warning`.");
+"Exception that serves as base for all Informix DB exceptions\n\
+except for `Warning`.");
 
 PyDoc_STRVAR(ExcInterfaceError_doc,
 "Exception raised for errors in the database interface.\n\n\
-This exception is currently raised when trying to use a closed `Connection`\n\
-`Cursor`, when too few or too many parameters are passed to `Cursor.execute`\n\
-or when a (internal) datetime conversion error occurs.");
+This exception is currently raised when trying to use a closed\n\
+`Connection`, `Cursor`, when too few or too many parameters\n\
+are passed to `Cursor.execute` or when an internal datetime\n\
+conversion error occurs.");
 
 PyDoc_STRVAR(ExcDatabaseError_doc,
 "Exception raised for errors related to the database.\n\n\
-This exception serves as base class for more specific database errors and\n\
-as catchall for database errors which don't fit into any other category.\n\n\
-Informix DB uses ``SQLSTATE`` classes to map database errors to specific\n\
-exception classes. In some cases however the database doesn't provide\n\
-useful values for the error class and Informix DB falls back to `DatabaseError`.");
+This exception serves as base class for more specific database\n\
+errors and as catchall for database errors which don't fit into\n\
+any other category.\n\n\
+Informix DB uses ``SQLSTATE`` classes to map database errors to\n\
+specific exception classes. In some cases however the database\n\
+does not provide useful values for the error class and Informix DB\n\
+falls back to `DatabaseError`.");
 
 PyDoc_STRVAR(ExcInternalError_doc,
 "Exception raised for errors internal to the database.\n\n\
 This exception is raised for invalid cursor or transaction states.");
 
 PyDoc_STRVAR(ExcOperationalError_doc,
-"Exception raised for operational database errors that aren't necessarily \
-under the programmer's control.\n\n\
-Raised for connection problems, situations where the database runs out\n\
-of memory or when the given credentials don't allow access to the database.");
+"Exception raised for operational database errors that aren't\n\
+necessarily under the programmer's control.\n\n\
+Raised for connection problems, situations where the database runs\n\
+out of memory or when the given credentials don't allow access to\n\
+the database.");
 
 PyDoc_STRVAR(ExcProgrammingError_doc,
 "Exception raised for errors caused by the program.\n\n\
-Raised e.g. when an invalid table is referenced, a syntax error occurs or\n\
-an SQL statement is invalid.");
+Raised e.g. when an invalid table is referenced, a syntax error\n\
+occurs or an SQL statement is invalid.");
 
 PyDoc_STRVAR(ExcIntegrityError_doc,
 "Exception raised when an integrity constraint would be violated.");
 
 PyDoc_STRVAR(ExcDataError_doc,
 "Exception raised for errors that occur due to the processed data.\n\n\
-Raised e.g. for a division by zero error or when a numeric value is out\n\
-of range.");
+Raised e.g. for a division by zero error or when a numeric value\n\
+is out of range.");
 
 PyDoc_STRVAR(ExcNotSupportedError_doc,
-"Exception raised when a missing or not supported feature is being used.\n\n\
-Raised when trying to rollback a transaction on a database which doesn't\n\
-support transactions or when the database doesn't support a particular feature\n\
-(e.g. VARCHARs or BYTE/TEXT types on Informix SE).");
+"Exception raised for trying to use a missing or unsupported feature.\n\n\
+Raised when trying to rollback a transaction on a database which\n\
+doesn't support transactions or when the database doesn't support a\n\
+particular feature (e.g. VARCHARs or BYTE/TEXT types on Informix SE).");
 
 /* Checks for occurance of database errors and handles them.
  * Evaluates to 1 to indicate that an exception was raised, or to 0
@@ -241,80 +246,92 @@ static PyObject *Cursor_getsqlerrd(Cursor *self, void *closure);
 PyDoc_STRVAR(Cursor_close_doc,
 "close()\n\n\
 Close the cursor now.\n\n\
-The cursor will be unusable from this point forward. Any operations on it\n\
-will raise an `InterfaceError`");
+The cursor will be unusable from this point forward. Any\n\
+operations on it will raise an `InterfaceError`");
 
 PyDoc_STRVAR(Cursor_execute_doc,
 "execute(operation [,seq_of_parameters])\n\n\
 Execute an arbitrary SQL statement.\n\n\
 `operation` is a string containing the SQL statements with optional\n\
-placeholders, where either ``qmark``-style (``SELECT * FROM names WHERE name = ?``)\n\
-or ``numeric``-style (``SELECT * FROM names WHERE name = :1``) can be used.\n\
+placeholders, where either ``qmark``-style\n\
+(``SELECT * FROM names WHERE name = ?``) or ``numeric``-style\n\
+(``SELECT * FROM names WHERE name = :1``) can be used.\n\
 \n\
-`seq_of_parameters` is a sequence of values to be bound to the placeholders in\n\
-the SQL statement. The number of values in the sequence must match the number\n\
-of parameters required by the SQL statement exactly. The types which are used\n\
-for binding are automatically derived from the Python types. For strings and\n\
-integers this is straightforward. To be able to bind date, time and binary\n\
-(``BYTE``/``TEXT``) values the module provides the constructors `Date`,\n\
-`Time`, `Timestamp`, `Binary` and some more to construct date and time\n\
-values from UNIX ticks.\n\n\
-Be careful when trying to pass in a single string for `seq_of_parameters`,\n\
-because it would be interpreted as a sequence. To get what is most likely\n\
-the desired effect you have to wrap it in a tuple, e.g.:\n\
+`seq_of_parameters` is a sequence of values to be bound to the\n\
+placeholders in the SQL statement. The number of values in the\n\
+sequence must match the number of parameters required by the SQL\n\
+statement exactly. The types which are used for binding are\n\
+automatically derived from the Python types. For strings and\n\
+integers this is straightforward. To be able to bind date, time\n\
+and binary (``BYTE``/``TEXT``) values the module provides the\n\
+constructors `Date`, `Time`, `Timestamp`, `Binary` and some more\n\
+to construct date and time values from UNIX ticks.\n\
 \n\
->>> cursor.execute('SELECT * FROM names WHERE first = :1', 'donald')\n\
+Be careful when trying to pass in a single string for\n\
+`seq_of_parameters`, because it would be interpreted as a\n\
+sequence. To get what is most likely the desired effect you have\n\
+to wrap it in a tuple, e.g.:\n\
+\n\
+>>> cursor.execute('SELECT * FROM names WHERE first=:1', 'joe')\n\
 Traceback (most recent call last):\n\
   File \"<stdin>\", line 1, in ?\n\
 _informixdb.InterfaceError: too many actual parameters\n\
->>> cursor.execute('SELECT * FROM names WHERE first = :1', ('donald',))\n\
+>>> cursor.execute('SELECT * FROM names WHERE first=:1', ('joe',))\n\
 \n"
-":Note: Informix DB implements the operation-caching optimization. This\n\
-       means that passing the same operation object to the same `Cursor`\n\
-       object's `execute` method multiple times in a row will prepare the\n\
-       statement only once. This may result in a significant improvement in\n\
-       execution speed when the same statement is executed many times with\n\
-       different parameters.\n\
+":Note: Informix DB implements the operation-caching optimization.\n\
+        This means that passing the same operation object to the\n\
+        same `Cursor` object's `execute` method multiple times in a\n\
+        row will prepare the statement only once. This may result\n\
+        in a significant improvement in execution speed when the\n\
+        same statement is executed many times with different\n\
+        parameters.\n\
 \n\
-:Returns: `execute` will return the number of affected rows for statements\n\
-          which modify data, ``-1`` where the number of affected rows cannot\n\
-          be determined or `None` for statements which return a result set.\n\
-          As the behaviour of the return value is not specified in the DB-API 2.0\n\
-          specification you are best advised using `rowcount` to determine\n\
-          the number of affected rows, as this will provide the same information\n\
+:Returns: `execute` will return the number of affected rows for\n\
+          statements which modify data, ``-1`` where the number of\n\
+          affected rows cannot be determined or `None` for statements\n\
+          which return a result set. As the behaviour of the return\n\
+          value is not specified in the DB-API 2.0 specification you\n\
+          are best advised using `rowcount` to determine the number\n\
+          of affected rows, as this will provide the same information\n\
           in a standards compliant way.");
 
 PyDoc_STRVAR(Cursor_executemany_doc,
 "executemany(operation, seq_of_parameters)\n\n\
-Execute an arbitrary SQL statement multiple times using different parameters.\n\n\
-The `operation` parameter is the same as for `execute`, `seq_of_parameters` is a\n\
-sequence of parameter tuples (or more generally sequences) suitable for passing\n\
-to `execute`. This will invoke `execute` for all parameter sequences in\n\
-`seq_of_parameters`, but will still be fast since the operation is prepared only\n\
-once.\n\n\
-For batch inserts a special optimization applies, which will make use of\n\
-insert cursors. This can result in a huge speed increase compared to calling\n\
-`execute` multiple times, especially when used over a network.\n\
+Execute an arbitrary SQL statement multiple times using different\n\
+parameters.\n\
+\n\
+The `operation` parameter is the same as for `execute`,\n\
+`seq_of_parameters` is a sequence of parameter tuples (or more\n\
+generally sequences) suitable for passing to `execute`. This will\n\
+invoke `execute` for all parameter sequences in `seq_of_parameters`,\n\
+but will still be fast since the operation is prepared only once.\n\
+\n\
+For batch inserts a special optimization applies, which will make\n\
+use of insert cursors. This can result in a huge speed increase\n\
+compared to calling `execute` multiple times, especially when used\n\
+over a network.\n\
 \n\
 :Seealso: `execute`");
 
 PyDoc_STRVAR(Cursor_fetchone_doc,
 "fetchone() -> sequence\n\n\
 Fetch the next row of a query result set.\n\n\
-The next row is returned either as sequence or as mapping, depending on how\n\
-the `Cursor` was created (see `Connection.cursor`). When no more rows are\n\
-are available `None` is returned.\n\n\
-Calling `fetchone` when no statement was executed or after a statement that\n\
-does not produce a result set was executed will raise an Error.");
+The next row is returned either as sequence or as mapping,\n\
+depending on how the `Cursor` was created (see\n\
+`Connection.cursor`). When no more rows are are available\n\
+`None` is returned.\n\n\
+Calling `fetchone` when no statement was executed or after\n\
+a statement that does not produce a result set was executed\n\
+will raise an Error.");
 
 PyDoc_STRVAR(Cursor_fetchmany_doc,
 "fetchmany([size=Cursor.arraysize]) -> list\n\n\
 Fetch a specified number of rows of a query result set.\n\n\
-Return up to `size` rows in a list, or fewer if there are no more rows\n\
-available. An empty list is returned if no row is available.\n\
+Return up to `size` rows in a list, or fewer if there are no more\n\
+rows available. An empty list is returned if no row is available.\n\
 \n\
-The types of the rows and the behaviour in error cases is the same as for\n\
-`fetchone`.");
+The types of the rows and the behaviour in error cases is the same\n\
+as for `fetchone`.");
 
 PyDoc_STRVAR(Cursor_fetchall_doc,
 "fetchall() -> list\n\n\
@@ -322,8 +339,8 @@ Fetch all (remaining) rows of a query result set.\n\n\
 Return as many rows as there are available in the result set or an\n\
 empty list if there are no more rows available.\n\
 \n\
-The types of the rows and the behaviour in error cases is the same as for\n\
-`fetchone`.");
+The types of the rows and the behaviour in error cases is the same\n\
+as for `fetchone`.");
 
 PyDoc_STRVAR(Cursor_setinputsizes_doc,
 "setinputsizes(sizes)\n\n\
@@ -338,18 +355,19 @@ Informix DB does not implement this optimization.");
 PyDoc_STRVAR(Cursor_callproc_doc,
 "callproc(procname[,parameters]) -> sequence\n\n\
 Execute a stored procedure.\n\n\
-Call the stored procedure `procname` with parameters as given in the sequence\n\
-`parameters`. This is preferable to `execute` with an ``EXECUTE PROCEDURE ...``\n\
-statement in most cases, because it should also work with other DB-API 2.0\n\
-implementations.\n\
+Call the stored procedure `procname` with parameters as given in\n\
+the sequence `parameters`. This is preferable to `execute` with an\n\
+``EXECUTE PROCEDURE ...`` statement in most cases, because it\n\
+should also work with other DB-API 2.0 implementations.\n\
 \n\
-If the stored procedure generates a result set it can be accessed through the\n\
-standard fetch methods.\n\
+If the stored procedure generates a result set it can be accessed\n\
+through the standard fetch methods.\n\
 \n\
-:Returns: The unmodified input sequence, because Informix doesn't support ``out``\n\
-          or ``in/out`` arguments on stored procedures (the specification says\n\
-          that a copy of the input sequence should be returned, where ``out``\n\
-          and ``in/out`` arguments are replaced by their new values).\n\
+:Returns: The unmodified input sequence, because Informix doesn't\n\
+          support ``out`` or ``in/out`` arguments on stored\n\
+          procedures (the specification says that a copy of the\n\
+          input sequence should be returned, where ``out`` and\n\
+          ``in/out`` arguments are replaced by their new values).\n\
 ");
 
 static PyMethodDef Cursor_methods[] = {
@@ -374,6 +392,15 @@ static PyMethodDef Cursor_methods[] = {
   { NULL }
 };
 
+PyDoc_STRVAR(Cursor_messages_doc,
+"List of SQL warning and error messages.\n\n\
+:Seealso: `Connection.messages`");
+
+PyDoc_STRVAR(Cursor_errorhandler_doc,
+"Python callable which is invoked for SQL errors.\n\n\
+:Seealso: `Connection.errorhandler`"
+);
+
 static PyMemberDef Cursor_members[] = {
   { "description", T_OBJECT_EX, offsetof(Cursor, description), READONLY,
     "Information about result columns." },
@@ -382,9 +409,9 @@ static PyMemberDef Cursor_members[] = {
   { "arraysize", T_INT, offsetof(Cursor, arraysize), 0,
     "Number of rows to fetch in fetchmany." },
   { "messages", T_OBJECT_EX, offsetof(Cursor, messages), READONLY,
-    "List of SQL warning and error messages." },
+    Cursor_messages_doc }, 
   { "errorhandler", T_OBJECT_EX, offsetof(Cursor, errorhandler), 0,
-    "Python callable which is invoked for SQL errors." },
+    Cursor_errorhandler_doc },
   { "connection", T_OBJECT_EX, offsetof(Cursor, conn), 0,
     "Database connection associated with this cursor." },
   { NULL }
@@ -392,35 +419,37 @@ static PyMemberDef Cursor_members[] = {
 
 static PyGetSetDef Cursor_getseters[] = {
   { "sqlerrd", (getter)Cursor_getsqlerrd, NULL,
-    "SQL error descriptor as tuple", NULL },
+    "Informix SQL error descriptor as tuple", NULL },
   { NULL }
 };
 
 PyDoc_STRVAR(Cursor_doc,
 "Executes SQL statements and fetches their results.\n\n\
-`Cursor` objects are the central objects in interacting with the database\n\
-since they provide the methods necessary to execute SQL statements and fetch\n\
-results from the database.\n\
+`Cursor` objects are the central objects in interacting with the\n\
+database since they provide the methods necessary to execute SQL\n\
+statements and fetch results from the database.\n\
 \n\
 To create a `Cursor` object call `Connection.cursor`.\n\
 \n\
-You can then use the `execute`, `executemany` and `callproc` methods to issue\n\
-SQL statements and get their results with `fetchone`, `fetchmany`, `fetchall`\n\
-or by iterating over the `Cursor` object.\n\
+You can then use the `execute`, `executemany` and `callproc` methods\n\
+to issue SQL statements and get their results with `fetchone`,\n\
+`fetchmany`, `fetchall` or by iterating over the `Cursor` object.\n\
 \n\
-:Note: Iterating over a `Cursor` object is an extension to the DB-API 2.0\n\
-       specification.\n\
+:Note: Iterating over a `Cursor` object is an extension to the\n\
+       DB-API 2.0 specification.\n\
 \n\
-:Note: As an extension to the DB-API 2.0 specification Informix DB provides\n\
-       named cursors which allow you to use the ``... WHERE CURRENT OF ...``\n\
-       clause in your SQL statements. For information on how to use them see\n\
-       the `Connection.cursor` documentation.\n\
+:Note: As an extension to the DB-API 2.0 specification Informix DB\n\
+       provides named cursors which allow you to use the\n\
+       ``... WHERE CURRENT OF ...`` clause in your SQL statements.\n\
+       For information on how to use them see the `Connection.cursor`\n\
+       documentation.\n\
 \n\
-:Note: `Cursor` objects do not directly map to underlying database cursors.\n\
-       Actual database cursors are created in `execute`, `executemany` or\n\
-       `callproc` when needed (i.e. for ``SELECT`` and ``EXECUTE PROCEDURE``\n\
-       statements) and closed upon the next invocation of `execute`,\n\
-       `executemany` or `callproc` or when the `Cursor` object is deallocated.");
+:Note: `Cursor` objects do not directly map to underlying database\n\
+       cursors. Actual database cursors are created in `execute`,\n\
+       `executemany` or `callproc` when needed (i.e. for ``SELECT``\n\
+       and ``EXECUTE PROCEDURE`` statements) and closed upon the\n\
+       next invocation of `execute`, `executemany` or `callproc` or\n\
+       when the `Cursor` object is deallocated.");
 
 static PyTypeObject Cursor_type = {
   PyObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type))
@@ -492,23 +521,25 @@ static PyObject *Connection_rollback(Connection *self);
 static PyObject *Connection_close(Connection *self);
 
 PyDoc_STRVAR(Connection_cursor_doc,
-"cursor([name=None,rowformat=informixdb.ROW_AS_TUPLE]) -> Cursor\n\n\
+"cursor([name=None,rowformat=_informixdb.ROW_AS_TUPLE]) -> Cursor\n\n\
 Return a new `Cursor` object using the connection.\n\
-\n\n\
-`name` is an extension to the DB-API 2.0 specification and allows you to\n\
-optionally name your cursor. This is only useful when the cursor is going\n\
-to be used in ``'WHERE CURRENT OF <name>'`` clauses in SQL statements.\n\
-Note however, that you will have to use a second `Cursor` object to perform\n\
-the operation, since trying to execute the ``'... WHERE CURRENT OF ...'`` statement\n\
-with the named `Cursor` object itself will close it.\n\
 \n\
-`rowformat` is an extension to the DB-API 2.0 specification that can be used\n\
-to specify that dictionaries with the column names as keys should be used as\n\
-return values of `Cursor.fetchone`, `Cursor.fetchmany` and `Cursor.fetchall`\n\
-instead of tuples. To select this behaviour use `informixdb.ROW_AS_DICT` for\n\
-`rowformat`, e.g.:\n\
+`name` is an extension to the DB-API 2.0 specification and allows\n\
+you to optionally name your cursor. This is only useful when the\n\
+cursor is going to be used in ``'WHERE CURRENT OF <name>'`` clauses\n\
+in SQL statements. Note however, that you will have to use a second\n\
+`Cursor` object to perform the operation, since trying to execute\n\
+the ``'... WHERE CURRENT OF ...'`` statement with the named `Cursor`\n\
+object itself will close it.\n\
 \n\
->>> cursor = conn.cursor(rowformat=informixdb.ROW_AS_DICT)\n\
+`rowformat` is an extension to the DB-API 2.0 specification that\n\
+can be used to specify that dictionaries with the column names as\n\
+keys should be used as return values of `Cursor.fetchone`,\n\
+`Cursor.fetchmany` and `Cursor.fetchall` instead of tuples. To\n\
+select this behaviour use `_informixdb.ROW_AS_DICT` for `rowformat`,\n\
+e.g.:\n\
+\n\
+>>> cursor = conn.cursor(rowformat=_informixdb.ROW_AS_DICT)\n\
 >>> cursor.execute('SELECT * FROM names')\n\
 >>> cursor.fetchall()\n\
 [{'age': 34, 'last': 'duck', 'first': 'donald'},\n\
@@ -517,24 +548,26 @@ instead of tuples. To select this behaviour use `informixdb.ROW_AS_DICT` for\n\
 PyDoc_STRVAR(Connection_commit_doc,
 "commit()\n\n\
 Commit the current database transaction and start a new one.\n\n\
-`commit` does nothing for databases which have transactions disabled.");
+`commit` does nothing for databases which have transactions\n\
+disabled.");
 
 PyDoc_STRVAR(Connection_rollback_doc,
 "rollback()\n\n\
 Rollback the current database transaction and start a new one.\n\n\
-`rollback` raises a NotSupportedError for databases which have transactions\n\
-disabled");
+`rollback` raises a NotSupportedError for databases which have\n\
+transactions disabled.");
 
 PyDoc_STRVAR(Connection_close_doc,
 "close()\n\n\
 Close the connection and all associated `Cursor` objects.\n\n\
-This is automatically done when the `Connection` object and all its associated\n\
-cursors are destroyed.\n\n\
-After the connection is closed it becomes unusable and all operations on it\n\
-or its associated `Cursor` objects will raise an InterfaceError.\n\n\
-For databases which have transactions enabled an implicit rollback is\n\
-performed before the closing the connection, so be sure to commit any\n\
-outstanding operations before closing a `Connection`.");
+This is automatically done when the `Connection` object and all\n\
+its associated cursors are destroyed.\n\n\
+After the connection is closed it becomes unusable and all\n\
+operations on it or its associated `Cursor` objects will raise\n\
+an InterfaceError.\n\n\
+For databases which have transactions enabled an implicit rollback\n\
+is performed before the closing the connection, so be sure to\n\
+commit any outstanding operations before closing a `Connection`.");
 
 static PyMethodDef Connection_methods[] = {
   { "cursor", (PyCFunction)Connection_cursor, METH_VARARGS|METH_KEYWORDS,
@@ -549,20 +582,25 @@ static PyMethodDef Connection_methods[] = {
 };
 
 PyDoc_STRVAR(Connection_messages_doc,
-"A list with one ``(exception_class, exception_values)`` tuple for each error/warning.\n\n\
-The default `errorhandler` appends any warnings or errors concerning the\n\
-connection to this list. The list is automatically cleared by all connection\n\
-methods and can be manually cleared by the user with ``del connection.messages[:]``.\n\n\
-The purpose of these list is to eliminate the need to raise Warning exceptions.\n\n\
+"A list with one ``(exception_class, exception_values)`` tuple for\n\
+each error/warning.\n\n\
+The default `errorhandler` appends any warnings or errors\n\
+concerning the connection to this list. The list is automatically\n\
+cleared by all connection methods and can be manually cleared by\n\
+the user with ``del connection.messages[:]``.\n\n\
+The purpose of these list is to eliminate the need to raise\n\
+Warning exceptions.\n\n\
 :Note: This is an extension to the DB-API 2.0 specification.");
 
 PyDoc_STRVAR(Connection_errorhandler_doc,
 "An optional callable which can be used to customize error reporting.\n\n\
 `errorhandler` can be set to a callable of the form\n\
-``errorhandler(connection, cursor, errorclass, errorvalue)`` and will be\n\
-called for any errors or warnings concerning the connection.\n\n\
-The default (if errorhandler is None) is to append the error/warning to the\n\
-`messages` list and raise an exception unless the errorclass is `Warning`.\n\n\
+``errorhandler(connection, cursor, errorclass, errorvalue)``\n\
+and will be called for any errors or warnings concerning the\n\
+connection.\n\n\
+The default (if errorhandler is None) is to append the error/warning\n\
+to the `messages` list and raise an exception unless the\n\
+errorclass is `Warning`.\n\n\
 :Note: This is an extension to the DB-API 2.0 specification.");
 
 static PyMemberDef Connection_members[] = {
@@ -605,14 +643,14 @@ static PyGetSetDef Connection_getseters[] = {
 
 PyDoc_STRVAR(Connection_doc,
 "Connection to an Informix database.\n\n\
-Provides access to transactions and allows the creation of Cursor objects\n\
-via the `cursor` method.\n\n\
-As an extension to the DB-API 2.0 specification Informix DB provides the\n\
-exception classes as attributes of `Connection` objects in addition to the\n\
-module level attributes to simplify error handling in multi-connection\n\
-environments.\n\n\
-:Note: Do not instantiate objects of this class directly. Use \
-the `informixdb.connect` method instead.");
+Provides access to transactions and allows the creation of Cursor\n\
+objects via the `cursor` method.\n\n\
+As an extension to the DB-API 2.0 specification Informix DB provides\n\
+the exception classes as attributes of `Connection` objects in addition\n\
+to the module level attributes to simplify error handling in\n\
+multi-connection environments.\n\n\
+:Note: Do not instantiate objects of this class directly. Use the\n\
+       `_informixdb.connect` method instead.");
 
 static PyTypeObject Connection_type = {
   PyObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type))
@@ -2440,58 +2478,62 @@ static PyObject* db_connect(PyObject *self, PyObject *args, PyObject *kwds)
 PyDoc_STRVAR(db_connect_doc,
 "connect(dsn[,user,password]) -> Connection\n\n\
 Establish a connection to a database.\n\n\
-`dsn` identifies a database environment as accepted by the CONNECT statement.\n\
-It can be the name of a database (``'stores7'``) the name of a database server\n\
-(``'@valley'``) or a combination thereof (``'stores7@valley'``).");
+`dsn` identifies a database environment as accepted by the CONNECT\n\
+statement. It can be the name of a database (``'stores7'``) the name\n\
+of a database server (``'@valley'``) or a combination thereof\n\
+(``'stores7@valley'``).");
 
 PyDoc_STRVAR(db_Date_doc,
 "Date(year,month,day) -> datetime.date\n\n\
-Construct an object holding a date value");
+Construct an object holding a date value.");
 
 PyDoc_STRVAR(db_Time_doc,
 "Time(hour,minute,second[,microsecond=0]) -> datetime.datetime\n\n\
-Construct an object holding a time value\n\n\
-Note that `microsecond` is an extension to the DB-API specification. It\n\
-represents the fractional part of an Informix DATETIME column, and is\n\
-therefore limited to a maximum of 10 microseconds of accuracy.");
+Construct an object holding a time value.\n\n\
+:Note: `microsecond` is an extension to the DB-API specification. It\n\
+       represents the fractional part of an Informix DATETIME column,\n\
+       and is therefore limited to a maximum of 10 microseconds of\n\
+       accuracy.");
 
 PyDoc_STRVAR(db_Timestamp_doc,
 "Timestamp(year,month,day,hour=0,minute=0,second=0,microsecond=0) -> datetime.datetime\n\n\
-Construct an object holding a time stamp (datetime) value\n\n\
-Note that `microsecond` is an extension to the DB-API specification. It\n\
-represents the fractional part of an Informix DATETIME column, and is\n\
-therefore limited to a maximum of 10 microseconds of accuracy.");
+Construct an object holding a time stamp (datetime) value.\n\n\
+:Note: `microsecond` is an extension to the DB-API specification. It\n\
+       represents the fractional part of an Informix DATETIME column,\n\
+       and is therefore limited to a maximum of 10 microseconds of\n\
+       accuracy.");
 
 PyDoc_STRVAR(db_TimestampFromTicks_doc,
 "TimestampFromTicks(ticks) -> datetime.datetime\n\n\
-Construct an object holding a time stamp (datetime) from the given ticks value\n\n\
+Construct an object holding a time stamp (datetime) from the given\n\
+ticks value.\n\n\
 `ticks` are the number of seconds since the start of the current epoch\n\
-(1.1.1970 for UNIX).\n\
-Note that using ticks might cause problems, because they cover only a limited\n\
-time range. See the standard Python time and datetime modules' documentation\n\
-for details.");
+(1.1.1970 for UNIX).\n\n\
+:Note: Using ticks might cause problems, because they cover only a\n\
+       limited time range. See the standard Python `time` and `datetime`\n\
+       modules' documentation for details.");
 
 PyDoc_STRVAR(db_DateFromTicks_doc,
 "DateFromTicks(ticks) -> datetime.date\n\n\
-Construct an object holding a date value from the given ticks value\n\n\
+Construct an object holding a date value from the given ticks value.\n\n\
 `ticks` are the number of seconds since the start of the current epoch\n\
-(1.1.1970 for UNIX).\n\
-Note that using ticks might cause problems, because they cover only a limited\n\
-time range. See the standard Python time and datetime modules' documentation\n\
-for details.");
+(1.1.1970 for UNIX).\n\n\
+:Note: Using ticks might cause problems, because they cover only a\n\
+       limited time range. See the standard Python `time` and `datetime`\n\
+       modules' documentation for details.");
 
 PyDoc_STRVAR(db_TimeFromTicks_doc,
 "TimeFromTicks(ticks) -> datetime.datetime\n\n\
-Construct an object holding a time value from the given ticks value\n\n\
+Construct an object holding a time value from the given ticks value.\n\n\
 `ticks` are the number of seconds since the start of the current epoch\n\
-(1.1.1970 for UNIX).\n\
-Note that using ticks might cause problems, because they cover only a limited\n\
-time range. See the standard Python time and datetime modules' documentation\n\
-for details.");
+(1.1.1970 for UNIX).\n\n\
+:Note: Using ticks might cause problems, because they cover only a\n\
+       limited time range. See the standard Python `time` and `datetime`\n\
+       modules' documentation for details.");
 
 PyDoc_STRVAR(db_Binary_doc,
 "Binary(string) -> buffer\n\n\
-Construct an object capable of holding a binary (long) value");
+Construct an object capable of holding a binary (long) value.");
 
 static PyMethodDef globalMethods[] = {
   { "connect", (PyCFunction)db_connect, METH_VARARGS|METH_KEYWORDS,
@@ -2514,9 +2556,9 @@ static PyMethodDef globalMethods[] = {
 };
 
 PyDoc_STRVAR(_informixdb_doc,
-"DB-API 2.0 compliant database interface for Informix databases.\n\
+"`DB-API 2.0`_ compliant interface for Informix databases.\n\
 \n\
-To get you started while the documentation gets written (don't wait!):\n\
+To get you started:\n\
 \n\
 >>> import informixdb\n\
 >>> conn = informixdb.connect('mydatabase')\n\
@@ -2524,6 +2566,8 @@ To get you started while the documentation gets written (don't wait!):\n\
 >>> cursor.execute('SELECT * FROM names')\n\
 >>> cursor.fetchall()\n\
 [('donald', 'duck', 34), ('mickey', 'mouse', 23)]\n\
+\n\
+.. _DB-API 2.0: http://www.python.org/peps/pep-0249.html\n\
 \n\
 :Note: Informix DB uses the `datetime` module to represent date, time and\n\
        timestamp values. It is part of the standard library since\n\
@@ -2547,7 +2591,9 @@ void init_informixdb(void)
 
 #define defException(name, base) \
           do { \
-            PyObject* d = Py_BuildValue("{ss}", "__doc__", Exc##name##_doc); \
+            PyObject* d = Py_BuildValue("{sssssisN}", "__doc__", Exc##name##_doc,\
+                                        "action", "", "sqlcode", 0,\
+                                        "diagnostics", PyList_New(0)); \
             Exc##name = PyErr_NewException("_informixdb."#name, base, d); \
             Py_DECREF(d); \
             PyModule_AddObject(m, #name, Exc##name); \

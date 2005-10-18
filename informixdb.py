@@ -30,4 +30,8 @@
 # This is a trivial python wrapper around the C core _informixdb.so
 #
 
+""" DB-API 2.0 compliant interface for Informix databases.
+
+For full documentation please try `_informixdb`"""
+
 from _informixdb import *

@@ -149,8 +149,8 @@ module1 = Extension('_informixdb',
                     define_macros = extra_macros )
 
 setup (name = 'InformixDB',
-       version = '1.4',
-       description = 'InformixDB v1.4',
+       version = '2.0',
+       description = 'InformixDB v2.0',
        py_modules = modules,
        ext_modules = [module1],
        cmdclass = { 'build_ext' : build_ext })

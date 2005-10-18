@@ -6,6 +6,8 @@ from distutils.spawn import find_executable
 from distutils.sysconfig import get_python_inc
 from distutils.util import get_platform
 from distutils.command.build_ext import build_ext as _build_ext
+from distutils.dep_util import newer_group
+from distutils.errors import *
 
 class build_ext(_build_ext):
     """ build_ext which can handle ESQL/C (*.ec) files """
@@ -67,7 +69,10 @@ class build_ext(_build_ext):
           if token.startswith('"') and token.endswith('"'):
             token = token[1:-1]
           esql_config.append(token)
-        cout.close()
+        ret = cout.close()
+        if ret != None:
+          raise DistutilsSetupError, \
+                "\nCan't find esql. Please set INFORMIXDIR correctly."
 
         if get_platform()=="win32":
           for arg in esql_config:
@@ -97,6 +102,14 @@ class build_ext(_build_ext):
                               os.path.join(self.esql_informixdir,'lib')]
 
     def build_extension(self, ext):
+        # only preprocess with esql if necessary
+        fullname = self.get_ext_fullname(ext.name)
+        ext_filename = os.path.join(self.build_lib,
+                                        self.get_ext_filename(fullname))
+        if not (self.force or newer_group(ext.sources, ext_filename, 'newer')):
+            self.announce("skipping '%s' extension (up-to-date)" % ext.name)
+            return
+
         # preprocess *.ec files with 'esql'
         for file in ext.sources:
             if file.endswith('.ec'):

@@ -1,5 +1,6 @@
 import sys
 import os
+import shlex
 from distutils.core import setup, Extension
 from distutils.spawn import find_executable
 from distutils.sysconfig import get_python_inc
@@ -34,10 +35,16 @@ class build_ext(_build_ext):
         if not self.esql_informixdir:
             self.esql_informixdir = os.getenv("INFORMIXDIR")
         if not self.esql_informixdir:
+          if get_platform()=="win32":
+            self.esql_informixdir = "C:\\Program Files\\Informix\\Client-SDK"
+          else:
             self.esql_informixdir = "/usr/informix"
         os.environ['INFORMIXDIR'] = self.esql_informixdir
 
-        self.esql_parts.append(os.path.join(self.esql_informixdir, 'bin', 'esql'))
+        self.esql_parts.append(os.path.join(self.esql_informixdir,'bin','esql'))
+        if get_platform()=="win32":
+          if self.esql_parts[0].find(' ') != -1:
+            self.esql_parts[0] = '"' + self.esql_parts[0] + '"'
 
         if self.esql_threadlib:
             os.environ['THREADLIB'] = self.esql_threadlib
@@ -50,30 +57,44 @@ class build_ext(_build_ext):
             self.esql_parts.append('-static')
 
         # find esql libs/objects
-        cin,cout = os.popen2(' '.join(self.esql_parts + [ '-libs' ]))
-        esql_config = cout.readlines()
-        cin.close()
+        cout = os.popen(' '.join(self.esql_parts + [ '-libs' ]),'r')
+        esql_config = []
+        lexer = shlex.shlex(cout)
+        lexer.wordchars += '-.\\/'
+        while True:
+          token = lexer.get_token()
+          if token=='' or token==None: break
+          if token.startswith('"') and token.endswith('"'):
+            token = token[1:-1]
+          esql_config.append(token)
         cout.close()
 
-        for arg in esql_config:
-            if arg.startswith('-l'):
-                if self.libraries is None:
-                    self.libraries = []
-                self.libraries.append(arg[2:-1])
-            else:
-                if self.link_objects is None:
-                    self.link_objects = []
-                self.link_objects.append(arg[:-1])
+        if get_platform()=="win32":
+          for arg in esql_config:
+              if arg.endswith('.lib'):
+                  if self.libraries is None:
+                      self.libraries = []
+                  self.libraries.append(arg[:-4])
+        else:
+          for arg in esql_config:
+              if arg.startswith('-l'):
+                  if self.libraries is None:
+                      self.libraries = []
+                  self.libraries.append(arg[2:])
+              else:
+                  if self.link_objects is None:
+                      self.link_objects = []
+                  self.link_objects.append(arg)
 
         if self.include_dirs is None:
             self.include_dirs = []
-        self.include_dirs = [ self.esql_informixdir+'/incl/esql' ] \
+        self.include_dirs = [os.path.join(self.esql_informixdir,'incl','esql')]\
                             + self.include_dirs
 
         if self.library_dirs is None:
             self.library_dirs = []
-        self.library_dirs += [ self.esql_informixdir+'/lib/esql',
-                               self.esql_informixdir+'/lib' ]
+        self.library_dirs += [os.path.join(self.esql_informixdir,'lib','esql'),
+                              os.path.join(self.esql_informixdir,'lib')]
 
     def build_extension(self, ext):
         # preprocess *.ec files with 'esql'
@@ -123,7 +144,7 @@ if get_platform().startswith('aix-'):
   extra_macros.append(('_H_LOCALEDEF', None))
 
 module1 = Extension('_informixdb',
-                    sources = ['ext/_informixdb.ec'],
+                    sources = [os.path.join('ext','_informixdb.ec')],
                     include_dirs = ['ext'],
                     define_macros = extra_macros )
 

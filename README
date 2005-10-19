@@ -20,8 +20,7 @@ INSTALLATION (UNIX)
 ===================
 
 This distribution uses Python distutils to build and install the informixdb
-module.  It should work with Python 1.5.2 or later as long as distutils is
-present.
+module.  It requires Python 2.2 or later.
 
 
 In a hurry?
@@ -33,7 +32,7 @@ Type `python setup.py build_ext' and, as root, `python setup.py install'.
 Or want the details?
 --------------------
 
-First, extract the source distribution on a machine with Python 1.5.2 or
+First, extract the source distribution on a machine with Python 2.2 or
 later and INFORMIX-ESQL/C, and `cd' to the top-level directory.
 
 Next, run the build script `python setup.py build_ext', giving it any of the
@@ -62,10 +61,15 @@ which will install the package into the appropriate site-specific library path.
 INSTALLATION (Win32)
 ====================
 
-I'm afraid you're on your own.  distutils should do the Right Thing, but
-I haven't had the chance to try this yet. If you have had any success (or
-failure, for that matter) with building and installing InformixDB on Windows,
-I'd like to hear about it.
+A Windows installer for Python 2.4 is available for download at
+http://sourceforge.net/projects/informixdb. Download it and run it to
+install the InformixDB module. Note that you'll need the Informix Client SDK
+to use the InformixDB module.
+
+If you're using a different version of Python, you'll have to compile
+InformixDB from the sources, following the same steps as for a Unix
+installation. Distutils should do the right thing as long as you have the same
+compiler that produced the Python interpreter you're using.
 
 
 NEWS
@@ -201,14 +205,13 @@ FUTURE
 
 - Implement useful optional DB-API extensions if there are any that Daniel
   hasn't already implemented. ;)
-- Work out Windows installation procedure
 - Low priority unless people ask for it: support SLOBs and UDTs.
 
 MAINTAINER
 ==========
 
 Got questions and/or problems with informixdb?  Contact me at:
-  Carsten Haese <carstenh@sbcglobal.net>
+  Carsten Haese <chaese@users.sourceforge.net>
 
 I'd recommend that you also consider CC'ing the Python DB-SIG at:
   db-sig@python.org
@@ -238,5 +241,5 @@ Release  Date        By
 2.0      TBD         Carsten Haese
 
 --
-Carsten Haese <carstenh@sbcglobal.net>
+Carsten Haese <chaese@users.sourceforge.net>
 http://sourceforge.net/projects/informixdb

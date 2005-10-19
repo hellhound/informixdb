@@ -1,0 +1,8 @@
+README
+COPYRIGHT
+MANIFEST
+informixdb.py
+datetime.py
+setup.py
+ext/_informixdb.ec
+ext/datetime-compat.h

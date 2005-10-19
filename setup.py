@@ -6,6 +6,7 @@ from distutils.spawn import find_executable
 from distutils.sysconfig import get_python_inc
 from distutils.util import get_platform
 from distutils.command.build_ext import build_ext as _build_ext
+from distutils.command.bdist_wininst import bdist_wininst as _bdist_wininst
 from distutils.dep_util import newer_group
 from distutils.errors import *
 
@@ -127,6 +128,16 @@ class build_ext(_build_ext):
 
         _build_ext.build_extension(self, ext)
 
+class bdist_wininst(_bdist_wininst):
+    """ override bdist_wininst to include the license in the description. """
+    def get_inidata(self):
+        metadata = self.distribution.metadata
+        save_long_desc = metadata.long_description
+        metadata.long_description += "\n\n" + file("COPYRIGHT").read() + "\n"
+        result = _bdist_wininst.get_inidata(self)
+        metadata.long_description = save_long_desc
+        return result
+
 def have_c_datetime():
     """ Check whether the datetime C API is available. """
     v = sys.version_info
@@ -161,9 +172,39 @@ module1 = Extension('_informixdb',
                     include_dirs = ['ext'],
                     define_macros = extra_macros )
 
+# patch distutils if it can't cope with the "classifiers" or 
+# "download_url" keywords
+if sys.version < '2.2.3':
+    from distutils.dist import DistributionMetadata
+    DistributionMetadata.classifiers = None
+    DistributionMetadata.download_url = None
+
 setup (name = 'InformixDB',
        version = '2.0',
        description = 'InformixDB v2.0',
+       long_description = \
+         "InformixDB is a DB-API 2.0 compliant interface for IBM Informix\n"
+         "databases.",
+       maintainer = "Carsten Haese",
+       maintainer_email = "chaese@users.sourceforge.net",
+       url = "http://sourceforge.net/projects/informixdb",
+       license = "BSD License",
+       platforms = ["POSIX", "Microsoft Windows 95/98/NT/2000/XP"],
+       classifiers=[
+         "Development Status :: 5 - Production/Stable",
+         "Environment :: Console",
+         "Intended Audience :: Developers",
+         "License :: OSI Approved :: BSD License",
+         "Operating System :: Microsoft :: Windows :: Windows 95/98/2000",
+         "Operating System :: Microsoft :: Windows :: Windows NT/2000",
+         "Operating System :: POSIX",
+         "Programming Language :: C",
+         "Programming Language :: Python",
+         "Topic :: Database :: Front-Ends"
+       ],
        py_modules = modules,
        ext_modules = [module1],
-       cmdclass = { 'build_ext' : build_ext })
+       cmdclass = {
+         'build_ext' : build_ext,
+         'bdist_wininst': bdist_wininst
+       } )

@@ -1,0 +1,14 @@
+@import url(default.css);
+
+h1.title
+{ 
+    background: #408060; 
+    color: white; 
+    padding: 3pt 0;
+  /*  border-bottom: 0px; */
+}
+
+/*h1, h2
+{
+    border-bottom: 1px dashed #408060;
+}*/

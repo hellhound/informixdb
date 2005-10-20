@@ -1,0 +1,210 @@
+==========================
+ InformixDB Documentation
+==========================
+
+:Authors: Daniel Smertnig
+:Version: informixdb 2.0
+:Date: 2005-10-19
+:Sourceforge: `InformixDB on Sourceforge`_
+
+.. contents:: InformixDB
+
+Introduction
+============
+
+InformixDB is a Python extension module that allows you to connect to an
+Informix database via Python's Database API 2.0 [#pep249]_.
+
+Here's a quick example to get you started::
+
+    >>> import informixdb
+    >>> conn = informixdb.connect('mydatabase')
+    >>> cursor = conn.cursor()
+    >>> cursor.execute("SELECT * FROM names")
+    >>> cursor.fetchall()
+    [('donald', 'duck', 34), ('mickey', 'mouse', 23)]
+
+Connecting
+==========
+
+To do anything useful with InformixDB you must connect to a database. This
+is accomplished by calling `informixdb.connect`::
+
+    >>> import informixdb
+    >>> conn = informixdb.connect('db@daniel', user='me', password='something')
+    >>> conn
+    <_informixdb.Connection object at 0xb7d08e90>
+
+`informixdb.connect` takes three arguments: A `dsn` which identifies the
+database and server to connect to, as recognized by ESQL's ``CONNECT``
+statement (e.g. ``'database@server'``, ``'database'``, ``'@server'``) plus
+an optional `user` and a corresponding password.
+
+If the `dsn` doesn't include a servername the value of ``$INFORMIXSERVER``
+is used. When connecting without specifying the name of the database no
+database will be selected. This is useful for setting up a new database from
+within InformixDB.
+
+:TODO: document Connection.close, Cursor.close somewhere
+
+Executing SQL Statements
+========================
+
+To actually execute a SQL statement you have to create a `Cursor` object
+using `Connection.cursor`::
+
+    >>> cursor = conn.cursor()
+    >>> cursor
+    <_informixdb.Cursor object at 0xb7d84440>
+
+This Cursor object can then be used to execute SQL statements or to call
+stored procedures::
+
+    >>> cursor.execute('SELECT * FROM NAMES')
+    >>> cursor.callproc('lower')
+
+Binding parameters
+------------------
+
+To pass in arguments for an SQL statement a sequence can be passed in as second
+parameter. The arguments can then be referenced either by ``numeric`` or
+``qmark`` style::
+
+    >>> cursor.execute('INSERT INTO names VALUES(:1,:2,:3)', ('some', 'body', 56))
+    1
+    >>> cursor.execute('INSERT INTO names VALUES(?,?,?)', ('dagobert', 'duck', 77))
+    1
+
+Be careful when trying to pass in a single string as argument, since it
+would be interpreted as sequence, which is usually not what you want::
+
+    >>> cursor.execute('SELECT * FROM names WHERE first=:1', 'dagobert')
+    Traceback (most recent call last):
+      File "<stdin>", line 1, in ?
+    _informixdb.InterfaceError: too many actual parameters
+    >>> cursor.execute('SELECT * FROM names WHERE first=:1', ('dagobert',)
+
+As you can see InformixDB will catch most of these errors since it requires
+the number of arguments to match the number of parameters exactly.
+
+Calling stored procedures with arguments is supported in a similiar way,
+though you don't have to specify the arguments explicitely::
+
+    >>> cursor.callproc('lower', ('FOO',))
+
+Getting results
+---------------
+
+To retrieve the results of a previously executed SQL statement or stored
+procedure call one of `fetchone`, `fetchmany` or `fetchall` on the `Cursor`:
+
+- ``cursor.fetchone()``: Returns the next row of the result set or ``None``
+  if no more rows are available.
+
+- ``cursor.fetchmany([size=Cursor.arraysize])``: Fetches up to `size` rows
+  (less if there are no more rows) and returns them as a list. An empty list
+  is returned when no (more) rows are available.
+
+  If `size` is not specified `Cursor.arraysize` is used, which defaults to
+  ``1`` for InformixDB.
+
+- ``cursor.fetchall()``: Fetches all (remaining) rows and returns them as
+  list.
+
+::
+
+    >>> cursor.execute("SELECT * FROM names")
+    >>> cursor.fetchall()
+    [('donald', 'duck', 34), ('mickey', 'mouse', 23), ('dagobert', 'duck', 77), ('some', 'body', 56)]
+
+If you don't mind using an extension to the DB-API 2.0 specification you can
+also iterate over `Cursor` objects::
+
+    >>> cursor.execute("SELECT * FROM names")
+    >>> for row in cursor:
+    ...     print "%s %s (%d)" % row
+    ...
+    donald duck (34)
+    mickey mouse (23)
+    dagobert duck (77)
+    some body (56)
+    >>>
+
+Normally rows are returned as tuples, but you can also request that
+dictionaries should be returned instead. This must be specified when the
+`Cursor` is created::
+
+    >>> dictcur = conn.cursor(rowformat = informixdb.ROW_AS_DICT)
+    >>> dictcur.execute("SELECT * FROM names")
+    >>> dictcur.fetchone()
+    {'age': 34, 'last': 'duck', 'first': 'donald'}
+
+Fast execution of batch statements
+----------------------------------
+
+When `execute` is called multiple times with the same SQL statement object
+on the same Cursor object but different arguments the statement is prepared
+only once. 
+
+You can also use `executemany`, which takes a sequence of
+parameter-sequences as taken by `execute` and executes the statement with
+each of the parameters. `executemany` will internally use insert cursors for
+batch inserts, which can result in a huge performance boost, especially over
+a network::
+
+    >>> cursor.executemany("INSERT INTO names VALUES(:1,:2,:3)",
+    ...     [ ('no', 'more', 12), ('names', 'left', 34) ]
+    ... )
+
+Using named Cursors
+-------------------
+
+:TODO: describe named cursor and how to use them
+
+
+TODO stuff
+-----------
+
+:TODO: document Cursor attributes somewhere
+
+:TODO: document how Cursor.description can be used & how it relates to result
+       sets
+
+Transactions
+============
+
+:TODO: document commit / rollback
+
+Database Values
+===============
+
+:TODO: how values are bound
+
+:TODO: how values can be constructed
+
+InformixDB uses the `datetime` module to represent date, time and timestamp
+values. This module is part of the standard library since Python 2.3 and is
+automatically installed by InformixDB for Python 2.2.
+
+Take care that while the ``FRAC`` part of Informix ``DATETIME`` fields is
+mapped to `datetime.microseconds` the precision is limited to a maximum of
+10 microseconds, due to the limited precision of fractional datetimes in
+Informix.
+
+Error Handling
+==============
+
+:TODO: describe exception types
+
+Interpreting Errors
+-------------------
+
+:TODO: attributes of DatabaseError & Warning
+
+Customizing Error Handling
+--------------------------
+
+:TODO: errorhandler & messages
+
+.. _InformixDB on Sourceforge: http://www.sourceforge.net/projects/informixdb
+.. [#pep249] http://www.python.org/peps/pep-0249.html

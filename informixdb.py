@@ -30,8 +30,27 @@
 # This is a trivial python wrapper around the C core _informixdb.so
 #
 
-""" DB-API 2.0 compliant interface for Informix databases.
+"""\
+ DB-API 2.0 compliant interface for IBM Informix databases.
 
-For full documentation please try `_informixdb`"""
+Here's a small example to get you started:
+
+>>> import informixdb
+>>> conn = informixdb.connect('mydatabase')
+>>> cursor = conn.cursor()
+>>> cursor.execute('SELECT * FROM names')
+>>> cursor.fetchall()
+[('donald', 'duck', 34), ('mickey', 'mouse', 23)]
+
+For more information on DB-API 2.0, see
+http://www.python.org/peps/pep-0249.html
+"""
 
 from _informixdb import *
+
+# promote the class definitions of _informixdb.Cursor and
+# _informixdb.Connection into this namespace so that help(informixdb)
+# sees their doc strings.
+from _informixdb import Cursor as _Cursor, Connection as _Connection
+class Cursor(_Cursor): pass
+class Connection(_Connection): pass

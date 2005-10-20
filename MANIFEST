@@ -6,3 +6,5 @@ datetime.py
 setup.py
 ext/_informixdb.ec
 ext/datetime-compat.h
+tests/dbapi20.py
+tests/testdbapi.py

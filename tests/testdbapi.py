@@ -53,6 +53,7 @@ class TestDBAPI(dbapi20.DatabaseAPI20Test):
             except:
                 pass
             c.execute(self.storedproc)
+            con.commit()
         finally:
             con.close()
 

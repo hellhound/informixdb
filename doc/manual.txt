@@ -48,7 +48,7 @@ setting up a new database from within InformixDB.
 A `Connection` can be closed by calling its `close` method. From that point
 forward all operations on the `Connection` object or any of its associated
 `Cursor` objects will raise an `InterfaceError`. A connection will also be
-closed when upon deallocation (this requires all `Cursor` objects which use
+closed upon deallocation (this requires all `Cursor` objects which use
 the connection to be closed or deallocated first).
 
 Executing SQL statements
@@ -75,7 +75,7 @@ Binding parameters
 ------------------
 
 To pass in arguments for an SQL statement a sequence can be passed as second
-parameter to `execute`. The arguments can then be referenced either by
+parameter to `execute`. The arguments can then be referenced either using
 ``numeric`` or ``qmark`` style::
 
     >>> cursor.execute('INSERT INTO names VALUES(:1,:2,:3)', ('some', 'body', 56))
@@ -84,7 +84,7 @@ parameter to `execute`. The arguments can then be referenced either by
     1
 
 Care must be taken when passing in a single string as argument, since it
-would be interpreted as sequence, which is usually not what is intended::
+would be interpreted as a sequence, which is usually not what is intended::
 
     >>> cursor.execute('SELECT * FROM names WHERE first=:1', 'dagobert')
     Traceback (most recent call last):
@@ -117,7 +117,7 @@ procedure `Cursor` objects provide tho `fetchone`, `fetchmany` and
   If `size` is not specified `Cursor.arraysize` is used, which defaults to
   ``1`` for InformixDB.
 
-- ``fetchall()``: Fetches all (remaining) rows and returns them as list.
+- ``fetchall()``: Fetches all (remaining) rows and returns them as a list.
 
 ::
 
@@ -160,7 +160,7 @@ tuple consists of `name`, `type_code`, `display_size`, `internal_size`,
 currently always set to `None` by InformixDB).
 
 The `type_code` is a textual description of the column type and can be
-evaluated by comparing it with the global type objects defined by the
+evaluated by comparing it to the global type objects defined by the
 `informixdb`-module (see `Database values`_)::
 
     >>> cursor.execute('SELECT * FROM names')
@@ -182,8 +182,8 @@ only once.
 `executemany` can be used to execute the same statement with different
 parameters multiple times. It takes a sequence of parameter-sequences as
 taken by `execute` as its second argument and executes the statement for
-each of the paramaters. Internally insert cursors for batch inserts, which
-can result in a huge performance boost, especially over a network::
+each of the parameters. Internally, insert cursors are used for batch inserts,
+which can result in a huge performance boost, especially over a network::
 
     >>> cursor.executemany("INSERT INTO names VALUES(:1,:2,:3)",
     ...     [ ('no', 'more', 12), ('names', 'left', 34) ]
@@ -192,21 +192,21 @@ can result in a huge performance boost, especially over a network::
 Using named cursors
 -------------------
 
-Named Cursor can be created by passing the requested cursor name in as first
+Named Cursors can be created by passing the requested cursor name in as first
 argument to `Connection.cursor`::
 
     >>> namcursor = conn.cursor('foo')
 
 The returned `Cursor` object will then use this name whenever it declares a
-database cursor. It is important to note that a `Cursor` objects lifetime is
+database cursor. It is important to note that a `Cursor` object's lifetime is
 decoupled from that actual database cursors. Database cursor are created
 whenever a SQL statement that can return a result set is executed (i.e.
 ``SELECT`` and ``EXECUTE PROCEDURE``) and destroyed when the `Cursor` is
 closed or another statement is executed with the same `Cursor` object.
 
 The main implication of this is that you cannot use the named `Cursor`
-object to execute statements on the named cursor, as that will destroy the
-database cursor before executing the statement. Instead a second (possibly
+object to execute statements on the named cursor itself, as that will destroy
+the database cursor before executing the statement. Instead, a second (possibly
 unnamed) `Cursor` is used to execute ``... WHERE CURRENT OF ...``
 statements::
 
@@ -239,13 +239,13 @@ information about executed statements:
     this attribute.
 
 `rowcount`
-    Number of rows effected by the last executed statement, or -1 if no
-    statement was executed or the number is not determinable. InformixDB
-    only provides values for ``DELETE``, ``UPDATE`` and ``INSERT``
+    Number of rows affected by the last executed statement, or -1 if no
+    statement was executed or the number can not be determined. InformixDB
+    only provides values for ``DELETE``, ``UPDATE``, and ``INSERT``
     statements.
 
 `sqlerrd`
-    Informix SQL error descriptor (``sqlerrd``) as tuple.
+    Informix SQL error descriptor (``sqlerrd``) as a tuple.
 
 `messages`
     See `Advanced error handling`_ on how to use `errorhandler` and `messages`.
@@ -256,7 +256,7 @@ information about executed statements:
 Transactions
 ============
 
-When enabled in the underlying database transactions can be used by calling
+When enabled in the underlying database, transactions can be used by calling
 `commit` and `rollback` on a `Connection` object. A new transaction will
 automatically be started after the previous one was committed or rolled
 back.
@@ -300,7 +300,7 @@ InformixDB:
     database independent time or timestamp (i.e. ``DATETIME``) values.
 
 ``NULL``
-    SQL ``NULL`` is represented by Pythons ``None`` when binding parameters
+    SQL ``NULL`` is represented by Python's ``None`` when binding parameters
     or returning results.
 
 Furthermore there are a number of objects defined by the module which can be
@@ -362,7 +362,7 @@ to report error conditions:
     `DatabaseError`
         Base and catch-all for errors reported by the database.
         `DatabaseError` or subclasses of it are raised whenever a database
-        oparations fails.  When its possible to determine the class of an
+        oparations fails.  When it's possible to determine the class of an
         error via ``SQLSTATE``, the more specific error types are raised.
 
         `DataError`
@@ -395,8 +395,8 @@ to report error conditions:
 
 `Warning`
     Represents a SQL warning (e.g. data truncation). This exception is never
-    actually raised by the default error handler. By default warnings are
-    only reported via the `Connection` or `Cursor` objects `messages`
+    actually raised by the default error handler. By default, warnings are
+    only reported via the `Connection` or `Cursor` object's `messages`
     attribute (see `Advanced error handling`_).
 
 These exception types are accessible as attributes of the
@@ -429,7 +429,7 @@ information about the underlying SQL error::
 `diagnostics`
     Sequence of all diagnostic messages reported by Informix where each item
     is a dictionary with keys ``'message'`` for a text representation of the
-    error and ``'sqlstate'`` for the corresponding SQLSTATE value.
+    message and ``'sqlstate'`` for the corresponding SQLSTATE value.
 
 Advanced error handling
 -----------------------
@@ -460,16 +460,16 @@ of a `Connection` or `Cursor` method):
 - The exception class and exception value is determined.
 - The `Cursor` or `Connection` objects `errorhandler` attribute is checked
   to see if it is set.
-- If a `errorhandler` is available it is invoked with `connection`,
+- If an `errorhandler` is available, it is invoked with `connection`,
   `cursor`, `errorclass` and `errorvalue` as its arguments. The error
-  handler might raise an exception or return in which case execution is
+  handler might raise an exception or return, in which case execution is
   continued.
-- If no `errorhandler` is available the built in error handler is invoked.
+- If no `errorhandler` is available, the built in error handler is invoked.
   A  ``(errorclass, errorvalue)`` tuple is appended to the `Cursor` or
-  `Connection` objects messages attribute and if the error is an actual
-  error (i.e. not of type `Warning`) an exception is raised. 
+  `Connection` object's messages attribute, and if the error is an actual
+  error (i.e. not of type `Warning`), an exception is raised. 
 
 
 
-.. _InformixDB on Sourceforge: http://www.sourceforge.net/projects/informixdb
+.. _InformixDB on Sourceforge: http://informixdb.sourceforge.net/
 .. [#pep249] http://www.python.org/peps/pep-0249.html

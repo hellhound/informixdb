@@ -13,15 +13,10 @@ h1, h2, h3
     border-bottom: 1px dashed #448866;
 }
 
-table.field-list
+div.note
 {
-    background: yellow; 
-    margin: 0.5em 1em;
-    border: 1px solid black;
-}
-
-table.docutils th.field-name, table.docutils td.field-body
-{
-    padding: 0.3em 0.5em;
-    background: #ffff77;
+   margin: 0.5em 2em; 
+   padding: 0.5em 0.5em;
+   background: #ffff77;
+   border: 1px solid black;
 }

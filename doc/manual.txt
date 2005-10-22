@@ -67,9 +67,9 @@ stored procedures::
     >>> cursor.execute('SELECT * FROM NAMES')
     >>> cursor.callproc('lower')
 
-:Note: It is also possible to call a stored procedure by issuing a ``EXECUTE
-       PROCEDURE ...`` statement with `execute`, but `callproc` should be
-       used where possible for standards compatibility.
+.. note:: It is also possible to call a stored procedure by issuing a
+          ``EXECUTE PROCEDURE ...`` statement with `execute`, but `callproc`
+          should be used where possible for standards compatibility.
 
 Binding parameters
 ------------------
@@ -334,15 +334,16 @@ come from `Cursor.description`::
     >>> informixdb.NUMBER == 'decimal'
     1
 
-:Note: InformixDB uses the `datetime` module to represent date, time and
-       timestamp values. This module is part of the standard library since
-       Python 2.3 and is automatically installed by InformixDB for Python 2.2.
+.. note:: InformixDB uses the `datetime` module to represent date, time and
+          timestamp values. This module is part of the standard library
+          since Python 2.3 and is automatically installed by InformixDB for
+          Python 2.2.
 
-:Note: The ``FRAC`` part of Informix ``DATETIME`` fields is mapped to
-       `datetime.microseconds` but the precision is limited to a maximum of
-       10 microseconds (or less, depending on how the field is defined in
-       the database), due to the limited precision of fractional datetimes
-       in Informix.
+.. note:: The ``FRAC`` part of Informix ``DATETIME`` fields is mapped to
+          `datetime.microseconds` but the precision is limited to a maximum
+          of 10 microseconds (or less, depending on how the field is defined
+          in the database), due to the limited precision of fractional
+          datetimes in Informix.
 
 Error handling
 ==============

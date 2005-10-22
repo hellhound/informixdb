@@ -2,13 +2,26 @@
 
 h1.title
 { 
-    background: #408060; 
+    background: #448866; 
     color: white; 
     padding: 3pt 0;
-  /*  border-bottom: 0px; */
+    border-bottom: 0px;
 }
 
-/*h1, h2
+h1, h2, h3
 {
-    border-bottom: 1px dashed #408060;
-}*/
+    border-bottom: 1px dashed #448866;
+}
+
+table.field-list
+{
+    background: yellow; 
+    margin: 0.5em 1em;
+    border: 1px solid black;
+}
+
+table.docutils th.field-name, table.docutils td.field-body
+{
+    padding: 0.3em 0.5em;
+    background: #ffff77;
+}

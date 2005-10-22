@@ -4,18 +4,18 @@
 
 :Authors: Daniel Smertnig
 :Version: informixdb 2.0
-:Date: 2005-10-19
-:Sourceforge: `InformixDB on Sourceforge`_
+:Date: 2005-10-22
+:Homepage: `InformixDB on Sourceforge`_
 
 .. contents:: InformixDB
 
 Introduction
 ============
 
-InformixDB is a Python extension module that allows you to connect to an
+InformixDB is a Python extension module that provides a way to connect to an
 Informix database via Python's Database API 2.0 [#pep249]_.
 
-Here's a quick example to get you started::
+Here's a quick example to get started::
 
     >>> import informixdb
     >>> conn = informixdb.connect('mydatabase')
@@ -27,7 +27,7 @@ Here's a quick example to get you started::
 Connecting
 ==========
 
-To do anything useful with InformixDB you must connect to a database. This
+To do anything useful with InformixDB one must connect to a database. This
 is accomplished by calling `informixdb.connect`::
 
     >>> import informixdb
@@ -40,18 +40,22 @@ database and server to connect to, as recognized by ESQL's ``CONNECT``
 statement (e.g. ``'database@server'``, ``'database'``, ``'@server'``) plus
 an optional `user` and a corresponding password.
 
-If the `dsn` doesn't include a servername the value of ``$INFORMIXSERVER``
-is used. When connecting without specifying the name of the database no
-database will be selected. This is useful for setting up a new database from
-within InformixDB.
+If the `dsn` doesn't include a servername the value of the environment
+variable ``INFORMIXSERVER`` is used. When connecting without specifying the
+name of the database no database will be selected. This is useful for
+setting up a new database from within InformixDB.
 
-:TODO: document Connection.close, Cursor.close somewhere
+A `Connection` can be closed by calling its `close` method. From that point
+forward all operations on the `Connection` object or any of its associated
+`Cursor` objects will raise an `InterfaceError`. A connection will also be
+closed when upon deallocation (this requires all `Cursor` objects which use
+the connection to be closed or deallocated first).
 
-Executing SQL Statements
+Executing SQL statements
 ========================
 
-To actually execute a SQL statement you have to create a `Cursor` object
-using `Connection.cursor`::
+To actually execute a SQL statement a `Cursor` object must be created by
+calling `Connection.cursor`::
 
     >>> cursor = conn.cursor()
     >>> cursor
@@ -63,20 +67,24 @@ stored procedures::
     >>> cursor.execute('SELECT * FROM NAMES')
     >>> cursor.callproc('lower')
 
+:Note: It is also possible to call a stored procedure by issuing a ``EXECUTE
+       PROCEDURE ...`` statement with `execute`, but `callproc` should be
+       used where possible for standards compatibility.
+
 Binding parameters
 ------------------
 
-To pass in arguments for an SQL statement a sequence can be passed in as second
-parameter. The arguments can then be referenced either by ``numeric`` or
-``qmark`` style::
+To pass in arguments for an SQL statement a sequence can be passed as second
+parameter to `execute`. The arguments can then be referenced either by
+``numeric`` or ``qmark`` style::
 
     >>> cursor.execute('INSERT INTO names VALUES(:1,:2,:3)', ('some', 'body', 56))
     1
     >>> cursor.execute('INSERT INTO names VALUES(?,?,?)', ('dagobert', 'duck', 77))
     1
 
-Be careful when trying to pass in a single string as argument, since it
-would be interpreted as sequence, which is usually not what you want::
+Care must be taken when passing in a single string as argument, since it
+would be interpreted as sequence, which is usually not what is intended::
 
     >>> cursor.execute('SELECT * FROM names WHERE first=:1', 'dagobert')
     Traceback (most recent call last):
@@ -84,11 +92,11 @@ would be interpreted as sequence, which is usually not what you want::
     _informixdb.InterfaceError: too many actual parameters
     >>> cursor.execute('SELECT * FROM names WHERE first=:1', ('dagobert',)
 
-As you can see InformixDB will catch most of these errors since it requires
-the number of arguments to match the number of parameters exactly.
+InformixDB will catch most of these errors since it requires the number of
+arguments to match the number of parameters exactly.
 
 Calling stored procedures with arguments is supported in a similiar way,
-though you don't have to specify the arguments explicitely::
+except that no placeholders have to be specified::
 
     >>> cursor.callproc('lower', ('FOO',))
 
@@ -96,29 +104,30 @@ Getting results
 ---------------
 
 To retrieve the results of a previously executed SQL statement or stored
-procedure call one of `fetchone`, `fetchmany` or `fetchall` on the `Cursor`:
+procedure `Cursor` objects provide tho `fetchone`, `fetchmany` and
+`fetchall` methods:
 
-- ``cursor.fetchone()``: Returns the next row of the result set or ``None``
-  if no more rows are available.
+- ``fetchone()``: Returns the next row of the result set or ``None`` if no
+  more rows are available.
 
-- ``cursor.fetchmany([size=Cursor.arraysize])``: Fetches up to `size` rows
-  (less if there are no more rows) and returns them as a list. An empty list
-  is returned when no (more) rows are available.
+- ``fetchmany([size=Cursor.arraysize])``: Fetches up to `size` rows (less if
+  there are no more rows) and returns them as a list. An empty list is
+  returned when no (more) rows are available.
 
   If `size` is not specified `Cursor.arraysize` is used, which defaults to
   ``1`` for InformixDB.
 
-- ``cursor.fetchall()``: Fetches all (remaining) rows and returns them as
-  list.
+- ``fetchall()``: Fetches all (remaining) rows and returns them as list.
 
 ::
 
     >>> cursor.execute("SELECT * FROM names")
     >>> cursor.fetchall()
-    [('donald', 'duck', 34), ('mickey', 'mouse', 23), ('dagobert', 'duck', 77), ('some', 'body', 56)]
+    [('donald', 'duck', 34), ('mickey', 'mouse', 23),
+     ('dagobert', 'duck', 77), ('some', 'body', 56)]
 
-If you don't mind using an extension to the DB-API 2.0 specification you can
-also iterate over `Cursor` objects::
+As an extension to the DB-API 2.0 specification InformixDB `Cursor` objects
+can also be used as iterators::
 
     >>> cursor.execute("SELECT * FROM names")
     >>> for row in cursor:
@@ -130,14 +139,38 @@ also iterate over `Cursor` objects::
     some body (56)
     >>>
 
-Normally rows are returned as tuples, but you can also request that
-dictionaries should be returned instead. This must be specified when the
-`Cursor` is created::
+Normally rows are returned as tuples, but optionally dictionaries can be
+returned. This must be specified when the `Cursor` is created::
 
     >>> dictcur = conn.cursor(rowformat = informixdb.ROW_AS_DICT)
     >>> dictcur.execute("SELECT * FROM names")
     >>> dictcur.fetchone()
     {'age': 34, 'last': 'duck', 'first': 'donald'}
+
+Describing result sets
+,,,,,,,,,,,,,,,,,,,,,,
+
+Whenever a statement which returns a result set is executed a description of
+the columns returned is made available in the `Cursor` objects `description`
+attribute.
+
+It is a sequence of 7-tuples with one tuple for each returned column. Each
+tuple consists of `name`, `type_code`, `display_size`, `internal_size`,
+`precision`, `scale` and `null_ok` values (`precision` and `scale` are
+currently always set to `None` by InformixDB).
+
+The `type_code` is a textual description of the column type and can be
+evaluated by comparing it with the global type objects defined by the
+`informixdb`-module (see `Database values`_)::
+
+    >>> cursor.execute('SELECT * FROM names')
+    >>> cursor.description
+    (('first', 'char', 25, 25, None, None, 1),('last', 'char', 50, 50,
+    None, None, 1), ('age', 'integer', 4, 4, None, None, 1))
+    >>> cursor.description[0][1] == informixdb.STRING
+    1
+    >>> cursor.description[0][1] == informixdb.NUMBER
+    0
 
 Fast execution of batch statements
 ----------------------------------
@@ -146,65 +179,292 @@ When `execute` is called multiple times with the same SQL statement object
 on the same Cursor object but different arguments the statement is prepared
 only once. 
 
-You can also use `executemany`, which takes a sequence of
-parameter-sequences as taken by `execute` and executes the statement with
-each of the parameters. `executemany` will internally use insert cursors for
-batch inserts, which can result in a huge performance boost, especially over
-a network::
+`executemany` can be used to execute the same statement with different
+parameters multiple times. It takes a sequence of parameter-sequences as
+taken by `execute` as its second argument and executes the statement for
+each of the paramaters. Internally insert cursors for batch inserts, which
+can result in a huge performance boost, especially over a network::
 
     >>> cursor.executemany("INSERT INTO names VALUES(:1,:2,:3)",
     ...     [ ('no', 'more', 12), ('names', 'left', 34) ]
     ... )
 
-Using named Cursors
+Using named cursors
 -------------------
 
-:TODO: describe named cursor and how to use them
+Named Cursor can be created by passing the requested cursor name in as first
+argument to `Connection.cursor`::
 
+    >>> namcursor = conn.cursor('foo')
 
-TODO stuff
------------
+The returned `Cursor` object will then use this name whenever it declares a
+database cursor. It is important to note that a `Cursor` objects lifetime is
+decoupled from that actual database cursors. Database cursor are created
+whenever a SQL statement that can return a result set is executed (i.e.
+``SELECT`` and ``EXECUTE PROCEDURE``) and destroyed when the `Cursor` is
+closed or another statement is executed with the same `Cursor` object.
 
-:TODO: document Cursor attributes somewhere
+The main implication of this is that you cannot use the named `Cursor`
+object to execute statements on the named cursor, as that will destroy the
+database cursor before executing the statement. Instead a second (possibly
+unnamed) `Cursor` is used to execute ``... WHERE CURRENT OF ...``
+statements::
 
-:TODO: document how Cursor.description can be used & how it relates to result
-       sets
+    >>> namcursor = conn.cursor('foo')
+    >>> cursor = conn.cursor()
+    >>> namcursor.execute('SELECT * FROM names FOR UPDATE')
+    >>> namcursor.fetchone()
+    ('donald', 'duck', 34)
+    >>> cursor.execute("UPDATE names SET first='notdonald' WHERE CURRENT OF foo")
+    1
+    >>> cursor.execute("SELECT * FROM names")
+    >>> cursor.fetchone()
+    ('notdonald', 'duck', 34)
+
+Cursor attributes
+-----------------
+
+`Cursor` objects expose a few attributes, most of which provide extra
+information about executed statements:
+
+`arraysize`
+    Default `size` to be used for `fetchmany`, defaults to 1.
+
+`connection`
+    The `Connection` object associated with this `Cursor`.
+
+`description`
+    Description of the result set returned by the currently prepared
+    statement. See `Describing result sets`_ for information on how to use
+    this attribute.
+
+`rowcount`
+    Number of rows effected by the last executed statement, or -1 if no
+    statement was executed or the number is not determinable. InformixDB
+    only provides values for ``DELETE``, ``UPDATE`` and ``INSERT``
+    statements.
+
+`sqlerrd`
+    Informix SQL error descriptor (``sqlerrd``) as tuple.
+
+`messages`
+    See `Advanced error handling`_ on how to use `errorhandler` and `messages`.
+
+`errorhandler`
+    See `Advanced error handling`_ on how to use `errorhandler` and `messages`.
 
 Transactions
 ============
 
-:TODO: document commit / rollback
+When enabled in the underlying database transactions can be used by calling
+`commit` and `rollback` on a `Connection` object. A new transaction will
+automatically be started after the previous one was committed or rolled
+back.
 
-Database Values
+Before the connection to the database is closed an implicit rollback is
+performed.
+
+When transactions are disabled in the database, `commit` becomes a no-op and
+`rollback` raises a `NotSupportedError` when called.
+
+Database values
 ===============
 
-:TODO: how values are bound
+The following describes how database values are mapped to Python objects by
+InformixDB:
 
-:TODO: how values can be constructed
+``CHAR``, ``VARCHAR``, ``NCHAR``, ``NVARCHAR``, ``LVARCHAR``
+    `string`
 
-InformixDB uses the `datetime` module to represent date, time and timestamp
-values. This module is part of the standard library since Python 2.3 and is
-automatically installed by InformixDB for Python 2.2.
+``FLOAT``, ``SMALLFLOAT``, ``DECIMAL``, ``MONEY``
+    `float`
 
-Take care that while the ``FRAC`` part of Informix ``DATETIME`` fields is
-mapped to `datetime.microseconds` the precision is limited to a maximum of
-10 microseconds, due to the limited precision of fractional datetimes in
-Informix.
+``SMALLINT``, ``INT``, ``SERIAL``
+    `int`
 
-Error Handling
+``BYTE``, ``TEXT``
+    `buffer`; The ``informixdb.Binary(string)`` should be used to create
+    database independent large object values.
+
+``DATE``
+    `datettime.date`; ``informixdb.Date(year,month,day)`` or
+    ``informixdb.DateFromTicks(ticks)`` should be used to create database
+    independent date values.
+
+``DATETIME``
+    `datetime.datetime`;
+    ``informixdb.Time(hour,minute,second[,microsecond=0])``,
+    ``informixdb.TimeFromTicks(ticks)``,
+    ``informixdb.Timestamp(year,month,day,hour=0,minute=0,second=0[,microsecond=0]``
+    or ``informixdb.TimestampFromTicks(ticks)`` should be used to create
+    database independent time or timestamp (i.e. ``DATETIME``) values.
+
+Furthermore there are a number of objects defined by the module which can be
+used to compare database column types as they appear in `Cursor.description`
+against well-known types in a database independent manner:
+
+`informixdb.STRING`
+    Compares equal to any string based types.
+
+`informixdb.BINARY`
+    Compares equal to long/binary types (``BYTE`` and ``TEXT``).
+
+`informixdb.NUMBER`
+    Compares equal to any numeric types.
+
+`informixdb.DATETIME`
+    Compares equal to any date, time or datetime types.
+
+`informixdb.ROWID`
+    Compares equal to rowid types (i.e. ``SERIAL``).
+
+They are used like this, except of course that the actual column types would
+come from `Cursor.description`::
+
+    >>> informixdb.STRING == 'char'
+    1
+    >>> informixdb.STRING == 'integer'
+    0
+    >>> informixdb.NUMBER == 'integer'
+    1
+    >>> informixdb.NUMBER == 'decimal'
+    1
+
+:Note: InformixDB uses the `datetime` module to represent date, time and
+       timestamp values. This module is part of the standard library since
+       Python 2.3 and is automatically installed by InformixDB for Python 2.2.
+
+:Note: The ``FRAC`` part of Informix ``DATETIME`` fields is mapped to
+       `datetime.microseconds` but the precision is limited to a maximum of
+       10 microseconds (or less, depending on how the field is defined in
+       the database), due to the limited precision of fractional datetimes
+       in Informix.
+
+Error handling
 ==============
 
-:TODO: describe exception types
+InformixDB defines a number of exception types derived from `StandardError`
+to report error conditions:
 
-Interpreting Errors
--------------------
+`Error`
+    Base for all InformixDB errors.
 
-:TODO: attributes of DatabaseError & Warning
+    `InterfaceError`
+        Error in the database interface itself. This is currently raised
+        when trying to used closed `Cursor` or `Connection` objects or when
+        an internal date/time conversion error occurs.
 
-Customizing Error Handling
---------------------------
+    `DatabaseError`
+        Base and catch-all for errors reported by the database.
+        `DatabaseError` or subclasses of it are raised whenever a database
+        oparations fails.  When its possible to determine the class of an
+        error via ``SQLSTATE``, the more specific error types are raised.
 
-:TODO: errorhandler & messages
+        `DataError`
+            Error due to the processed data. E.g. a division by zero or
+            when a numeric value is out of range.
+
+        `OperationalError`
+            Operational database errors that aren't necessarily under the
+            programmer's control, e.g. connection problems, permission
+            denied or out of memory conditions.
+
+        `IntegrityError`
+            An integrity constraint would be violated.
+
+        `InternalError`
+            An error internal to the database, e.g. invalid cursor or
+            transaction states.
+
+        `ProgrammingError`
+            An error caused by the program. Typically raised when an invalid
+            table is referenced, a syntax error occurs or a SQL statement is
+            invalid.
+
+        `NotSupportedError`
+            A operation or method is not supported by the database. Raised
+            when trying to invoke `rollback` on a database that doesn't
+            support transactions or when the database doesn't support a
+            particular feature (e.g. ``BYTE/TEXT`` or ``VARCHAR`` on
+            Informix SE).
+
+`Warning`
+    Represents a SQL warning (e.g. data truncation). This exception is never
+    actually raised by the default error handler. By default warnings are
+    only reported via the `Connection` or `Cursor` objects `messages`
+    attribute (see `Advanced error handling`_).
+
+These exception types are accessible as attributes of the
+`informixdb`-module or `Connection` objects.
+
+`DatabaseError` and `Warning` provide a number of useful attributes with
+information about the underlying SQL error::
+
+    >>> try:
+    ...     informixdb.connect('nonexisting')
+    ... except informixdb.DatabaseError, e:
+    ...     print e
+    ...     print e.action, e.sqlcode, e.diagnostics
+    ...
+    SQLCODE -329 in CONNECT:
+    IX000: Database not found or no system permission.
+    IX000: No such file or directory
+
+    CONNECT -329 [ {'message': 'Database not found or no system permission.',
+    'sqlstate': 'IX000'}, {'message': 'No such file or directory',
+    'sqlstate': 'IX000'}]
+
+`action`
+    The ESQL/C statement which was executed by InformixDB when the error was
+    encountered.
+
+`sqlcode`
+    Value of Informix' SQLCODE.
+
+`diagnostics`
+    Sequence of all diagnostic messages reported by Informix where each item
+    is a dictionary with keys ``'message'`` for a text representation of the
+    error and ``'sqlstate'`` for the corresponding SQLSTATE value.
+
+Advanced error handling
+-----------------------
+
+`Connection` and `Cursor` objects both have `errorhandler` and `messages`
+attributes which are used for error handling.
+
+`messages`
+    A list of ``(exception_class, exception_value)`` tuples for all errors
+    and warnings generated by the database relating to this `Cursor` or
+    `Connection`. This list is automatically cleared prior to execution of
+    any `Cursor` or `Connection` methods except for the `fetch*` methods.
+
+`errorhandler`
+    A Python callable of the form ``errorhandler(connection, cursor,
+    errorclass, errorvalue)`` which is called for all database warnings and
+    errors relating to this `Cursor` or `Connection`. The default (if this
+    is `None`) is to append the error/warning to the `messages` list and
+    raise an exception for errors.
+
+    This attribute is inherited from the associated `Connection` by `Cursor`
+    objects when they are created.
+
+When a database error occurs in InformixDB it is basically handled like this
+(which path is followed depends on whether the error occurs during execution
+of a `Connection` or `Cursor` method):
+
+- The exception class and exception value is determined.
+- The `Cursor` or `Connection` objects `errorhandler` attribute is checked
+  to see if it is set.
+- If a `errorhandler` is available it is invoked with `connection`,
+  `cursor`, `errorclass` and `errorvalue` as its arguments. The error
+  handler might raise an exception or return in which case execution is
+  continued.
+- If no `errorhandler` is available the built in error handler is invoked.
+  A  ``(errorclass, errorvalue)`` tuple is appended to the `Cursor` or
+  `Connection` objects messages attribute and if the error is an actual
+  error (i.e. not of type `Warning`) an exception is raised. 
+
+
 
 .. _InformixDB on Sourceforge: http://www.sourceforge.net/projects/informixdb
 .. [#pep249] http://www.python.org/peps/pep-0249.html

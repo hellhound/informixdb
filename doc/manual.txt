@@ -299,6 +299,10 @@ InformixDB:
     or ``informixdb.TimestampFromTicks(ticks)`` should be used to create
     database independent time or timestamp (i.e. ``DATETIME``) values.
 
+``NULL``
+    SQL ``NULL`` is represented by Pythons ``None`` when binding parameters
+    or returning results.
+
 Furthermore there are a number of objects defined by the module which can be
 used to compare database column types as they appear in `Cursor.description`
 against well-known types in a database independent manner:

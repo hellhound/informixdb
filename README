@@ -62,8 +62,8 @@ INSTALLATION (Win32)
 ====================
 
 A Windows installer for Python 2.4 is available for download at
-http://sourceforge.net/projects/informixdb. Download it and run it to
-install the InformixDB module. Note that you'll need the Informix Client SDK
+http://informixdb.sourceforge.net/. Download it and run it to install
+the InformixDB module. Note that you'll need the Informix Client SDK
 to use the InformixDB module.
 
 If you're using a different version of Python, you'll have to compile
@@ -239,8 +239,8 @@ Release  Date        By
 1.3      1999-11-30  Stephen J. Turner
 1.4      2005-04-11  Carsten Haese
 1.5      2005-09-18  Carsten Haese
-2.0      TBD         Carsten Haese
+2.0      2005-10-22  Carsten Haese
 
 --
 Carsten Haese <chaese@users.sourceforge.net>
-http://sourceforge.net/projects/informixdb
+http://informixdb.sourceforge.net/

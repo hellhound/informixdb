@@ -8,3 +8,8 @@ ext/_informixdb.ec
 ext/datetime-compat.h
 tests/dbapi20.py
 tests/testdbapi.py
+doc/default.css
+doc/informixdb.css
+doc/Makefile
+doc/manual.html
+doc/manual.txt

@@ -941,11 +941,31 @@ static int ibindString(struct sqlvar_struct *var, PyObject *item)
   PyObject *sitem = PyObject_Str(item);
   const char *val = PyString_AS_STRING((PyStringObject*)sitem);
   int n = strlen(val);
-  var->sqltype = CSTRINGTYPE;
-  var->sqldata = malloc(n+1);
-  var->sqllen = n+1;
-  *var->sqlind = 0;
-  memcpy(var->sqldata, val, n+1);
+  if (n<32768) {
+    var->sqltype = CSTRINGTYPE;
+    var->sqldata = malloc(n+1);
+    var->sqllen = n+1;
+    *var->sqlind = 0;
+    memcpy(var->sqldata, val, n+1);
+  }
+  else {
+    /* use lvarchar* instead */
+    EXEC SQL BEGIN DECLARE SECTION;
+    lvarchar **data;
+    EXEC SQL END DECLARE SECTION;
+    data = malloc(sizeof(void*));
+    *data = 0;
+    ifx_var_flag(data, 0);
+    ifx_var_alloc(data, n+1);
+    ifx_var_setlen(data, n);
+    ifx_var_setdata(data, (char *)val, n);
+    var->sqltype = SQLUDTVAR;
+    var->sqlxid = XID_LVARCHAR;
+    var->sqldata = *data;
+    var->sqllen  = sizeof(void*);
+    *var->sqlind = 0;
+    free( data );
+  }
   Py_DECREF(sitem);
   return 1;
 }
@@ -1116,7 +1136,10 @@ static void bindOutput(Cursor *cur)
       var->sqltype = CDTIMETYPE;
       break;
     default:
-      var->sqltype = CCHARTYPE;
+      if (ISCOMPLEXTYPE(var->sqltype) || ISUDTTYPE(var->sqltype))
+        var->sqltype = CLVCHARPTRTYPE;
+      else
+        var->sqltype = CCHARTYPE;
       break;
 
     }
@@ -1138,8 +1161,24 @@ static void bindOutput(Cursor *cur)
       loc->loc_oflags = 0;
       loc->loc_mflags = 0;
     }
-    var->sqldata = bufp;
-    bufp += var->sqllen;
+    else if (var->sqltype == CLVCHARPTRTYPE )
+    {
+      exec sql begin declare section;
+      lvarchar **currentlvarcharptr;
+      exec sql end declare section;
+
+      currentlvarcharptr = malloc(sizeof(void *));
+      *currentlvarcharptr = 0;
+      ifx_var_flag(currentlvarcharptr,1);
+
+      var->sqlxid = 1;
+      var->sqldata = *currentlvarcharptr;
+      var->sqllen  = sizeof(void *);
+    }
+    else {
+      var->sqldata = bufp;
+      bufp += var->sqllen;
+    }
 
     if (var->sqltype == CDTIMETYPE) {
       /* let the database set the correct datetime format */
@@ -1509,6 +1548,24 @@ static PyObject *doCopy(/* const */ void *data, int type)
     return buffer;
   } /* case SQLTEXT */
   } /* switch */
+  if (ISCOMPLEXTYPE(type)||ISUDTTYPE(type)) {
+    PyObject *buffer;
+    int lvcharlen = ifx_var_getlen(&data);
+    void *lvcharbuf = ifx_var_getdata(&data);
+    char *b_mem;
+    int b_len;
+
+    buffer = PyBuffer_New(lvcharlen);
+
+    if (PyObject_AsWriteBuffer(buffer, (void**)&b_mem, &b_len) == -1) {
+      Py_DECREF(buffer);
+      return NULL;
+    }
+
+    memcpy(b_mem, lvcharbuf, b_len);
+    ifx_var_dealloc(&data);
+    return buffer;
+  }
   Py_INCREF(Py_None);
   return Py_None;
 }
@@ -1579,6 +1636,9 @@ static void cleanInputBinding(Cursor *cur)
           if (loc->loc_buffer) {
             free(loc->loc_buffer);
           }
+        }
+        if (da->sqlvar[i].sqltype == SQLUDTVAR) {
+          ifx_var_dealloc((void**)&(da->sqlvar[i].sqldata));
         }
         free(da->sqlvar[i].sqldata);
       }

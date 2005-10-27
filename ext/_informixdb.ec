@@ -935,9 +935,11 @@ static int ibindDate(struct sqlvar_struct *var, PyObject *date)
 
 static int ibindString(struct sqlvar_struct *var, PyObject *item)
 {
+#if HAVE_PY_BOOL == 1
   if (PyBool_Check(item)) {
     item = PyNumber_Int(item);
   }
+#endif
   PyObject *sitem = PyObject_Str(item);
   const char *val = PyString_AS_STRING((PyStringObject*)sitem);
   int n = strlen(val);

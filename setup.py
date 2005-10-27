@@ -148,8 +148,17 @@ def have_c_datetime():
     else:
         return 0
 
+def have_py_bool():
+    if sys.version_info[0] > 2:
+        return 1
+    elif sys.version_info[0] == 2 and sys.version_info[1] >= 3:
+        return 1
+    else:
+        return 0
+
 extra_macros = [('PYTHON_INCLUDE', get_python_inc(plat_specific=1)),
-                ('HAVE_C_DATETIME', have_c_datetime())]
+                ('HAVE_C_DATETIME', have_c_datetime()),
+                ('HAVE_PY_BOOL', have_py_bool()) ]
 
 modules = [ 'informixdb' ]
 

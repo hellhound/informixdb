@@ -946,10 +946,6 @@ static int ibindString(struct sqlvar_struct *var, PyObject *item)
   var->sqllen = n+1;
   *var->sqlind = 0;
   memcpy(var->sqldata, val, n+1);
-  if (PyLong_Check(item)) {
-    /* erase 'L' suffix if present */
-    if (var->sqldata[n-1]=='L') { var->sqldata[n-1] = 0; }
-  }
   Py_DECREF(sitem);
   return 1;
 }

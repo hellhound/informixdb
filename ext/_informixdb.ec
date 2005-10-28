@@ -1134,6 +1134,11 @@ static void bindOutput(Cursor *cur)
     case SQLSERIAL:
       var->sqltype = CLONGTYPE;
       break;
+    case SQLINT8:
+    case SQLSERIAL8:
+      var->sqltype = CCHARTYPE;
+      var->sqllen = 20;
+      break;
     case SQLDTIME:
       var->sqltype = CDTIMETYPE;
       break;
@@ -1530,6 +1535,9 @@ static PyObject *doCopy(/* const */ void *data, int type)
   case SQLINT:
   case SQLSERIAL:
     return PyInt_FromLong(*(long*)data);
+  case SQLINT8:
+  case SQLSERIAL8:
+    return PyLong_FromString((char *)data, NULL, 10);
   case SQLBYTES:
   case SQLTEXT:
   {
@@ -2543,10 +2551,10 @@ void init_informixdb(void)
   static char* dbtp_string[] = { "char", "varchar", "nchar",
                                  "nvarchar", "lvarchar", NULL };
   static char* dbtp_binary[] = { "byte", "text", NULL };
-  static char* dbtp_number[] = { "smallint", "integer", "float",
+  static char* dbtp_number[] = { "smallint", "integer", "int8", "float",
                                  "smallfloat", "decimal", "money", NULL };
   static char* dbtp_datetime[] = { "date", "datetime", NULL };
-  static char* dbtp_rowid[] = { "serial", NULL };
+  static char* dbtp_rowid[] = { "serial", "serial8", NULL };
 
   PyObject *m = Py_InitModule3("_informixdb", globalMethods, _informixdb_doc);
 

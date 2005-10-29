@@ -99,6 +99,9 @@ static PyObject *ExcIntegrityError;
 static PyObject *ExcDataError;
 static PyObject *ExcNotSupportedError;
 
+static PyObject *IntervalY2MType;
+static PyObject *IntervalD2FType;
+
 PyDoc_STRVAR(ExcWarning_doc,
 "Exception class for SQL warnings.\n\n\
 The value of SQLSTATE is used to determine if a particular\n\
@@ -972,6 +975,31 @@ static int ibindString(struct sqlvar_struct *var, PyObject *item)
   return 1;
 }
 
+static int ibindInterval(struct sqlvar_struct *var, PyObject *item)
+{
+  PyObject *sitem = PyObject_Str(item);
+  const char *val = PyString_AS_STRING((PyStringObject*)sitem);
+  intrvl_t *inv = (intrvl_t*)malloc(sizeof(intrvl_t));
+  int ret;
+
+  if (PyObject_IsInstance(item, IntervalY2MType))
+     inv->in_qual = TU_IENCODE(9,TU_YEAR,TU_MONTH);
+  else
+     inv->in_qual = TU_IENCODE(9,TU_DAY,TU_F5);
+
+  if ((ret = incvasc((char *)val, inv)) != 0) {
+    PyErr_Format(ExcInterfaceError,
+      "Failed to parse interval value %s. incvasc returned %d", val, ret);
+    return 0;
+  }
+
+  var->sqldata = (void*)inv;
+  var->sqllen = sizeof(intrvl_t);
+  var->sqltype = CINVTYPE;
+  *var->sqlind = 0;
+  return 1;
+}
+
 static int ibindNone(struct sqlvar_struct *var, PyObject *item)
 {
   var->sqltype = CSTRINGTYPE;
@@ -985,7 +1013,10 @@ typedef int (*ibindFptr)(struct sqlvar_struct *, PyObject*);
 
 static ibindFptr ibindFcn(PyObject* item)
 {
-  if (PyBuffer_Check(item)) {
+  if (PyObject_IsInstance(item, IntervalY2MType) ||
+      PyObject_IsInstance(item, IntervalD2FType)) {
+    return ibindInterval;
+  } else if (PyBuffer_Check(item)) {
     return ibindBinary;
   } else if (PyDateTime_Check(item)) {
     return (ibindFptr)ibindDateTime;
@@ -1142,6 +1173,9 @@ static void bindOutput(Cursor *cur)
     case SQLDTIME:
       var->sqltype = CDTIMETYPE;
       break;
+    case SQLINTERVAL:
+      var->sqltype = CINVTYPE;
+      break;
     default:
       if (ISCOMPLEXTYPE(var->sqltype) || ISUDTTYPE(var->sqltype))
         var->sqltype = CLVCHARPTRTYPE;
@@ -1187,7 +1221,7 @@ static void bindOutput(Cursor *cur)
       bufp += var->sqllen;
     }
 
-    if (var->sqltype == CDTIMETYPE) {
+    if (var->sqltype == CDTIMETYPE || var->sqltype == CINVTYPE) {
       /* let the database set the correct datetime format */
       var->sqllen = 0;
     }
@@ -1504,6 +1538,71 @@ static PyObject *doCopy(/* const */ void *data, int type)
     }
     return PyDateTime_FromDateAndTime(year, month, day,
                                       hour, minute, second, usec);
+  }
+  case SQLINTERVAL:
+  {
+    /* Informix stores an interval as a decimal number, which in turn is
+       stored as a sequence of base 100 "digits." Since the starting unit
+       may span several base-100 digits, I extend the given interval to
+       the full length of its interval class, so that the starting unit,
+       is either the year or the day.  This leads to the two following cases:
+
+       Year(9) to Month
+           decimal digits: 0YYYYYYYYYMM00000000.00000
+        base-100 position: 10_9_8_7_6_5_4_3_2_1 _0-1-2
+
+       Day(9) to Fraction(5)
+           decimal digits: 0DDDDDDDDDHHMMSS.FFFFF
+        base-100 position: _8_7_6_5_4_3_2_1 _0-1-2
+    */     
+    int i, pos, d, sign=0;
+    int year=0,month=0,day=0,hour=0,minute=0,second=0,usec=0;
+    intrvl_t* inv = (intrvl_t*)data;
+    sign = (inv->in_dec.dec_pos==0)?-1:1;
+    if (TU_START(inv->in_qual) <= TU_MONTH) {
+      exec sql begin declare section;
+      interval year(9) to month inv_extended;
+      exec sql end declare section;
+      invextend(inv, &inv_extended);
+      inv = &inv_extended;
+      pos = inv->in_dec.dec_exp;
+      for (i=0; i<inv->in_dec.dec_ndgts; i++) {
+        d = inv->in_dec.dec_dgts[i];
+        switch(pos) {
+          case 10: case 9: case 8: case 7: case 6:
+            year = 100*year + d; break;
+          case 5: month = d; break;
+        }
+        pos--;
+      }
+      return PyObject_CallObject(IntervalY2MType,
+               Py_BuildValue("(ii)",sign*year,sign*month) );
+    }
+    else {
+      exec sql begin declare section;
+      interval day(9) to fraction(5) inv_extended;
+      exec sql end declare section;
+      invextend(inv, &inv_extended);
+      inv = &inv_extended;
+      pos = inv->in_dec.dec_exp;
+      for (i=0; i<inv->in_dec.dec_ndgts; i++) {
+        d = inv->in_dec.dec_dgts[i];
+        switch(pos) {
+          case 8: case 7: case 6: case 5: case 4:
+            day = 100*day + d; break;
+          case  3: hour = d; break;
+          case  2: minute = d; break;
+          case  1: second = d; break;
+          case  0: usec += 10000*d; break;
+          case -1: usec +=   100*d; break;
+          case -2: usec +=       d; break;
+        }
+        pos--;
+      }
+      return PyObject_CallObject(IntervalD2FType,
+               Py_BuildValue("(iii)", sign*day,
+                      sign*(3600*hour+60*minute+second), sign*usec) );
+    }
   }
   case SQLCHAR:
   case SQLVCHAR:
@@ -2557,6 +2656,8 @@ void init_informixdb(void)
   static char* dbtp_rowid[] = { "serial", "serial8", NULL };
 
   PyObject *m = Py_InitModule3("_informixdb", globalMethods, _informixdb_doc);
+  PyObject *informixdbmodule;
+  PyObject *informixdbmdict;
 
 #define defException(name, base) \
           do { \
@@ -2622,6 +2723,16 @@ void init_informixdb(void)
   PyModule_AddObject(m, "Connection", (PyObject*)&Connection_type);
   Py_INCREF(&Cursor_type);
   PyModule_AddObject(m, "Cursor", (PyObject*)&Cursor_type);
+
+  /* obtain the type objects for the Interval classes */
+  informixdbmodule = PyImport_ImportModule("informixdb");
+  informixdbmdict = PyModule_GetDict(informixdbmodule);
+  IntervalY2MType = PyDict_GetItemString(
+                      informixdbmdict, "IntervalYearToMonth");
+  IntervalD2FType = PyDict_GetItemString(
+                      informixdbmdict, "IntervalDayToFraction");
+  Py_INCREF(IntervalY2MType);
+  Py_INCREF(IntervalD2FType);
 
   PyDateTime_IMPORT;
 }

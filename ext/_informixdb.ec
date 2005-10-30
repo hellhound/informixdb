@@ -2370,8 +2370,8 @@ static int error_handle(Connection *connection, Cursor *cursor,
   if (handler) {
     PyObject *args, *hret;
 
-    args = Py_BuildValue("(ONOO)", type, value, (PyObject*)connection,
-                         cursor ? (PyObject*)cursor : Py_None);
+    args = Py_BuildValue("(OOON)", (PyObject*)connection,
+                         cursor ? (PyObject*)cursor : Py_None, type, value);
     hret = PyObject_Call(handler, args, NULL);
     Py_DECREF(args);
     if (hret) {

@@ -69,9 +69,9 @@ class IntervalYearToMonth(object):
         y,m,d = other.timetuple()[0:3]
         otherdate = datetime.date(y,m,d)
         # shift the date by the desired number of months
-        y2,m2 = divmod(m+self._months,12)
+        y2,m2 = divmod(m-1+self._months,12)
         try:
-          date2 = datetime.date(y+y2,m2,d)
+          date2 = datetime.date(y+y2,m2+1,d)
         except ValueError:
           raise ValueError, "month arithmetic yielded an invalid date."
         # apply the resulting timedelta to the operand

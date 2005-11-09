@@ -938,22 +938,19 @@ static int ibindDate(struct sqlvar_struct *var, PyObject *date)
 
 static int ibindString(struct sqlvar_struct *var, PyObject *item)
 {
+  PyObject *sitem;
+  const char *val;
+  int n;
 #if HAVE_PY_BOOL == 1
   if (PyBool_Check(item)) {
     item = PyNumber_Int(item);
   }
 #endif
-  PyObject *sitem = PyObject_Str(item);
-  const char *val = PyString_AS_STRING((PyStringObject*)sitem);
-  int n = strlen(val);
-  if (n<32768) {
-    var->sqltype = CSTRINGTYPE;
-    var->sqldata = malloc(n+1);
-    var->sqllen = n+1;
-    *var->sqlind = 0;
-    memcpy(var->sqldata, val, n+1);
-  }
-  else {
+  sitem = PyObject_Str(item);
+  val = PyString_AS_STRING((PyStringObject*)sitem);
+  n = strlen(val);
+EXEC SQL ifdef SQLLVARCHAR;
+  if (n >= 32768) {
     /* use lvarchar* instead */
     EXEC SQL BEGIN DECLARE SECTION;
     lvarchar **data;
@@ -970,6 +967,15 @@ static int ibindString(struct sqlvar_struct *var, PyObject *item)
     var->sqllen  = sizeof(void*);
     *var->sqlind = 0;
     free( data );
+  }
+  else
+EXEC SQL endif;
+  {
+    var->sqltype = CSTRINGTYPE;
+    var->sqldata = malloc(n+1);
+    var->sqllen = n+1;
+    *var->sqlind = 0;
+    memcpy(var->sqldata, val, n+1);
   }
   Py_DECREF(sitem);
   return 1;
@@ -1165,11 +1171,13 @@ static void bindOutput(Cursor *cur)
     case SQLSERIAL:
       var->sqltype = CLONGTYPE;
       break;
+#ifdef SQLINT8
     case SQLINT8:
     case SQLSERIAL8:
       var->sqltype = CCHARTYPE;
       var->sqllen = 20;
       break;
+#endif
     case SQLDTIME:
       var->sqltype = CDTIMETYPE;
       break;
@@ -1177,9 +1185,11 @@ static void bindOutput(Cursor *cur)
       var->sqltype = CINVTYPE;
       break;
     default:
+#ifdef CLVCHARPTRTYPE
       if (ISCOMPLEXTYPE(var->sqltype) || ISUDTTYPE(var->sqltype))
         var->sqltype = CLVCHARPTRTYPE;
       else
+#endif
         var->sqltype = CCHARTYPE;
       break;
 
@@ -1202,6 +1212,7 @@ static void bindOutput(Cursor *cur)
       loc->loc_oflags = 0;
       loc->loc_mflags = 0;
     }
+EXEC SQL ifdef SQLLVARCHAR;
     else if (var->sqltype == CLVCHARPTRTYPE )
     {
       exec sql begin declare section;
@@ -1216,6 +1227,7 @@ static void bindOutput(Cursor *cur)
       var->sqldata = *currentlvarcharptr;
       var->sqllen  = sizeof(void *);
     }
+EXEC SQL endif;
     else {
       var->sqldata = bufp;
       bufp += var->sqllen;
@@ -1634,9 +1646,11 @@ static PyObject *doCopy(/* const */ void *data, int type)
   case SQLINT:
   case SQLSERIAL:
     return PyInt_FromLong(*(long*)data);
+#ifdef SQLINT8
   case SQLINT8:
   case SQLSERIAL8:
     return PyLong_FromString((char *)data, NULL, 10);
+#endif
   case SQLBYTES:
   case SQLTEXT:
   {
@@ -1657,6 +1671,7 @@ static PyObject *doCopy(/* const */ void *data, int type)
     return buffer;
   } /* case SQLTEXT */
   } /* switch */
+#ifdef CLVCHARPTRTYPE
   if (ISCOMPLEXTYPE(type)||ISUDTTYPE(type)) {
     PyObject *buffer;
     int lvcharlen = ifx_var_getlen(&data);
@@ -1675,6 +1690,7 @@ static PyObject *doCopy(/* const */ void *data, int type)
     ifx_var_dealloc(&data);
     return buffer;
   }
+#endif
   Py_INCREF(Py_None);
   return Py_None;
 }
@@ -1746,9 +1762,11 @@ static void cleanInputBinding(Cursor *cur)
             free(loc->loc_buffer);
           }
         }
+#ifdef SQLUDTVAR
         if (da->sqlvar[i].sqltype == SQLUDTVAR) {
           ifx_var_dealloc((void**)&(da->sqlvar[i].sqldata));
         }
+#endif
         free(da->sqlvar[i].sqldata);
       }
     }

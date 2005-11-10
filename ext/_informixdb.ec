@@ -2928,7 +2928,7 @@ static PyObject *Sblob_open(Sblob *self, PyObject *args, PyObject *kwargs)
         PyString_FromString("Sblob is already open")))
       return NULL;
   }
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i", kwdlist, &flags))
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|i", kwdlist, &flags))
     return NULL;
   result = ifx_lo_open(&self->lo, flags, &err);
   if (result<0) {
@@ -2994,7 +2994,7 @@ static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs)
   PyObject *py_offset;
   PyObject *sitem;
   char *val, pos_str[30];
-  mint whence;
+  mint whence = LO_SEEK_SET;
   ifx_int8_t offset, seek_pos;
 
   if (!self->lofd) {
@@ -3002,7 +3002,7 @@ static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs)
         PyString_FromString("Sblob is not open")))
       return NULL;
   }
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Oi", kwdlist,
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O|i", kwdlist,
                                    &py_offset, &whence))
     return NULL;
   

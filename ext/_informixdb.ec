@@ -2910,6 +2910,7 @@ static void Sblob_dealloc(Sblob *self)
 
 static PyObject *Sblob_close(Sblob *self) {
   if (self->lofd) {
+    if (setConnection(self->conn)) return NULL;
     ifx_lo_close(self->lofd);
     self->lofd = 0;
   }
@@ -2930,6 +2931,7 @@ static PyObject *Sblob_open(Sblob *self, PyObject *args, PyObject *kwargs)
   }
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|i", kwdlist, &flags))
     return NULL;
+  if (setConnection(self->conn)) return NULL;
   result = ifx_lo_open(&self->lo, flags, &err);
   if (result<0) {
     ret_on_dberror(self->conn, NULL, "ifx_lo_open");
@@ -2957,6 +2959,7 @@ static PyObject *Sblob_read(Sblob *self, PyObject *args, PyObject *kwargs)
   if (!buf) {
     return PyErr_NoMemory();
   }
+  if (setConnection(self->conn)) return NULL;
   result = ifx_lo_read(self->lofd, buf, buflen, &err);
   if (result<0) {
     PyMem_Free(buf);
@@ -2980,6 +2983,7 @@ static PyObject *Sblob_write(Sblob *self, PyObject *args, PyObject *kwargs)
   }
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "s#", kwdlist, &buf, &buflen))
     return NULL;
+  if (setConnection(self->conn)) return NULL;
   result = ifx_lo_write(self->lofd, buf, buflen, &err);
   if (result<0) {
     ret_on_dberror(self->conn, NULL, "ifx_lo_write");
@@ -3013,6 +3017,7 @@ static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs)
   if (result<0) {
     ret_on_dberror(self->conn, NULL, "ifx_int8cvasc");
   }
+  if (setConnection(self->conn)) return NULL;
   if (ifx_lo_seek(self->lofd, &offset, whence, &seek_pos)<0) {
     ret_on_dberror(self->conn, NULL, "ifx_lo_seek");
   }
@@ -3033,6 +3038,7 @@ static PyObject *Sblob_tell(Sblob *self)
         PyString_FromString("Sblob is not open")))
       return NULL;
   }
+  if (setConnection(self->conn)) return NULL;
   if (ifx_lo_tell(self->lofd, &seek_pos)<0) {
     ret_on_dberror(self->conn, NULL, "ifx_lo_tell");
   }
@@ -3058,6 +3064,7 @@ static PyObject *Sblob_stat(Sblob *self)
         PyString_FromString("Sblob is not open")))
       return NULL;
   }
+  if (setConnection(self->conn)) return NULL;
   if (ifx_lo_stat(self->lofd, &lo_stat)<0) {
     ret_on_dberror(self->conn, NULL, "ifx_lo_stat");
   }

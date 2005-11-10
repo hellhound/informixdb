@@ -51,6 +51,15 @@
 #include <locator.h>
 #include <datetime.h>
 
+/* Use LO_RDWR to determine if the CSDK supports Smart Blobs */
+#ifdef LO_RDWR
+#define HAVE_SBLOB
+#define SBLOB_TYPE_BLOB 0
+#define SBLOB_TYPE_CLOB 1
+#else
+#undef HAVE_SBLOB
+#endif
+
 #if HAVE_C_DATETIME == 1
   /* Python and Informix both have a datetime.h, the Informix header is
    * included above because it comes first in the include path. We manually
@@ -202,6 +211,91 @@ particular feature (e.g. VARCHARs or BYTE/TEXT types on Informix SE).");
             }\
           } while(0)
 
+#ifdef HAVE_SBLOB
+/************************* Smart Blobs *************************/
+typedef struct Sblob_t
+{
+  PyObject_HEAD
+  struct Connection_t *conn;
+  int sblob_type;
+  ifx_lo_create_spec_t *lo_spec;
+  ifx_lo_t lo;
+  mint lofd; 
+} Sblob;
+
+static int Sblob_init(Sblob *self, PyObject *args, PyObject *kwargs);
+static void Sblob_dealloc(Sblob *self);
+static PyObject *Sblob_close(Sblob *self);
+static PyObject *Sblob_open(Sblob *self, PyObject *args, PyObject *kwargs);
+static PyObject *Sblob_read(Sblob *self, PyObject *args, PyObject *kwargs);
+static PyObject *Sblob_write(Sblob *self, PyObject *args, PyObject *kwargs);
+static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs);
+static PyObject *Sblob_tell(Sblob *self);
+static PyObject *Sblob_stat(Sblob *self);
+
+static PyMethodDef Sblob_methods[] = {
+  { "close", (PyCFunction)Sblob_close, METH_NOARGS },
+  { "open", (PyCFunction)Sblob_open, METH_VARARGS|METH_KEYWORDS },
+  { "read", (PyCFunction)Sblob_read, METH_VARARGS|METH_KEYWORDS },
+  { "write", (PyCFunction)Sblob_write, METH_VARARGS|METH_KEYWORDS },
+  { "seek", (PyCFunction)Sblob_seek, METH_VARARGS|METH_KEYWORDS },
+  { "tell", (PyCFunction)Sblob_tell, METH_NOARGS },
+  { "stat", (PyCFunction)Sblob_stat, METH_NOARGS },
+  { NULL }
+};
+
+static PyMemberDef Sblob_members[] = {
+  { NULL }
+};
+
+static PyGetSetDef Sblob_properties[] = {
+  { NULL }
+};
+
+static PyTypeObject Sblob_type = {
+  PyObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type))
+  0,                                  /* ob_size*/
+  "_informixdb.Sblob",                 /* tp_name */
+  sizeof(Sblob),                       /* tp_basicsize */
+  0,                                  /* tp_itemsize */
+  (destructor)Sblob_dealloc,           /* tp_dealloc */
+  0,                                  /* tp_print */
+  0,                                  /* tp_getattr */
+  0,                                  /* tp_setattr */
+  0,                                  /* tp_compare */
+  0,                                  /* tp_repr */
+  0,                                  /* tp_as_number */
+  0,                                  /* tp_as_sequence */
+  0,                                  /* tp_as_mapping */
+  0,                                  /* tp_hash */
+  0,                                  /* tp_call */
+  0,                                  /* tp_str */
+  0,                                  /* tp_getattro */
+  0,                                  /* tp_setattro */
+  0,                                  /* tp_as_buffer */
+  Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
+  "",                                 /* tp_doc */
+  0,                                  /* tp_traverse */
+  0,                                  /* tp_clear */
+  0,                                  /* tp_richcompare */
+  0,                                  /* tp_weaklistoffset */
+  0,                                  /* tp_iter */
+  0,                                  /* tp_iternext */
+  Sblob_methods,                       /* tp_methods */
+  Sblob_members,                       /* tp_members */
+  Sblob_properties,                    /* tp_getset */
+  0,                                  /* tp_base */
+  0,                                  /* tp_dict */
+  0,                                  /* tp_descr_get */
+  0,                                  /* tp_descr_set */
+  0,                                  /* tp_dictoffset */
+  (initproc)Sblob_init,                /* tp_init */
+  PyType_GenericAlloc,                /* tp_alloc */
+  PyType_GenericNew,                  /* tp_new */
+  _PyObject_Del                       /* tp_free */
+};
+#endif
+
 /************************* Cursors *************************/
 
 enum CURSOR_ROWFORMAT { CURSOR_ROWFORMAT_TUPLE, CURSOR_ROWFORMAT_DICT };
@@ -217,6 +311,7 @@ typedef struct Cursor_t
   struct sqlda daIn;
   struct sqlda *daOut;
   int *originalType;
+  int4 *originalXid;
   char *outputBuffer;
   short *indIn;
   short *indOut;
@@ -466,6 +561,9 @@ static PyObject *Connection_cursor(Connection *self, PyObject *args, PyObject *k
 static PyObject *Connection_commit(Connection *self);
 static PyObject *Connection_rollback(Connection *self);
 static PyObject *Connection_close(Connection *self);
+#ifdef HAVE_SBLOB
+static PyObject *Connection_Sblob(Connection *self, PyObject *args, PyObject *kwds);
+#endif
 
 PyDoc_STRVAR(Connection_cursor_doc,
 "cursor([name=None,rowformat=_informixdb.ROW_AS_TUPLE]) -> Cursor\n\n\
@@ -512,6 +610,10 @@ static PyMethodDef Connection_methods[] = {
     Connection_rollback_doc },
   { "close", (PyCFunction)Connection_close, METH_NOARGS,
     Connection_close_doc },
+#ifdef HAVE_SBLOB
+  { "Sblob", (PyCFunction)Connection_Sblob, METH_VARARGS|METH_KEYWORDS,
+    "" },
+#endif
   { NULL }
 };
 
@@ -852,7 +954,6 @@ static int doParse(parseContext *ct)
   return rc;
 }
 
-
 static int ibindBinary(struct sqlvar_struct *var, PyObject *item)
 {
   char *buf;
@@ -1006,6 +1107,23 @@ static int ibindInterval(struct sqlvar_struct *var, PyObject *item)
   return 1;
 }
 
+#ifdef HAVE_SBLOB
+static int ibindSblob(struct sqlvar_struct *var, PyObject *item)
+{
+  Sblob *sblob = (Sblob*)item;
+  ifx_lo_t *data = malloc(sizeof(ifx_lo_t));
+  memcpy(data, &(sblob->lo), sizeof(ifx_lo_t));
+  var->sqltype = SQLUDTFIXED;
+  if (sblob->sblob_type==SBLOB_TYPE_CLOB) 
+    var->sqlxid = XID_CLOB;
+  else
+    var->sqlxid = XID_BLOB;
+  var->sqldata = (void*)data;
+  var->sqllen  = sizeof(ifx_lo_t);
+  *var->sqlind = 0;
+}
+#endif
+
 static int ibindNone(struct sqlvar_struct *var, PyObject *item)
 {
   var->sqltype = CSTRINGTYPE;
@@ -1019,6 +1137,11 @@ typedef int (*ibindFptr)(struct sqlvar_struct *, PyObject*);
 
 static ibindFptr ibindFcn(PyObject* item)
 {
+#ifdef HAVE_SBLOB
+  if (PyObject_IsInstance(item, (PyObject*)&Sblob_type)) {
+    return ibindSblob;
+  } else
+#endif
   if (PyObject_IsInstance(item, IntervalY2MType) ||
       PyObject_IsInstance(item, IntervalD2FType)) {
     return ibindInterval;
@@ -1125,6 +1248,7 @@ static void bindOutput(Cursor *cur)
 
   cur->indOut = calloc(cur->daOut->sqld, sizeof(short));
   cur->originalType = calloc(cur->daOut->sqld, sizeof(int));
+  cur->originalXid = calloc(cur->daOut->sqld, sizeof(int4));
 
   Py_DECREF(cur->description);
   cur->description = PyTuple_New(cur->daOut->sqld);
@@ -1142,6 +1266,7 @@ static void bindOutput(Cursor *cur)
 
     var->sqlind = &cur->indOut[pos];
     cur->originalType[pos] = var->sqltype;
+    cur->originalXid[pos] = var->sqlxid;
 
     switch(var->sqltype & SQLTYPE){
     case SQLBYTES:
@@ -1185,17 +1310,28 @@ static void bindOutput(Cursor *cur)
       var->sqltype = CINVTYPE;
       break;
     default:
-#ifdef CLVCHARPTRTYPE
-      if (ISCOMPLEXTYPE(var->sqltype) || ISUDTTYPE(var->sqltype))
-        var->sqltype = CLVCHARPTRTYPE;
-      else
+#ifdef HAVE_SBLOB
+        if (ISSMARTBLOB(var->sqltype, var->sqlxid))
+          ; /* do nothing */
+        else
 #endif
-        var->sqltype = CCHARTYPE;
+#ifdef CLVCHARPTRTYPE
+        if (ISCOMPLEXTYPE(var->sqltype) || ISUDTTYPE(var->sqltype))
+          var->sqltype = CLVCHARPTRTYPE;
+        else
+#endif
+          var->sqltype = CCHARTYPE;
       break;
 
     }
+#ifdef HAVE_SBLOB
+    if (!ISSMARTBLOB(var->sqltype, var->sqlxid)) {
+#endif
     var->sqllen = rtypmsize(var->sqltype, var->sqllen);
     count = rtypalign(count, var->sqltype) + var->sqllen;
+#ifdef HAVE_SBLOB
+    }
+#endif
   }
 
   bufp = cur->outputBuffer = malloc(count);
@@ -1205,6 +1341,12 @@ static void bindOutput(Cursor *cur)
        pos++, var++) {
     bufp = (char *) rtypalign( (int) bufp, var->sqltype);
 
+#ifdef HAVE_SBLOB
+    if (ISSMARTBLOB(var->sqltype, var->sqlxid)) {
+      var->sqldata = malloc(sizeof(ifx_lo_t));
+    }
+    else
+#endif
     if (var->sqltype == CLOCATORTYPE) {
       loc_t *loc = (loc_t*) bufp;
       loc->loc_loctype = LOCMEMORY;
@@ -1502,7 +1644,8 @@ static PyObject *Cursor_executemany(Cursor *self,
   return Py_None;
 }
 
-static PyObject *doCopy(/* const */ void *data, int type)
+static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
+                                    struct Connection_t *conn)
 {
   switch(type){
   case SQLDATE:
@@ -1671,6 +1814,19 @@ static PyObject *doCopy(/* const */ void *data, int type)
     return buffer;
   } /* case SQLTEXT */
   } /* switch */
+#ifdef HAVE_SBLOB
+  if (ISSMARTBLOB(type,xid)) {
+      Sblob *new_sblob;
+      new_sblob = (Sblob*)PyObject_CallObject((PyObject*)&Sblob_type,
+               Py_BuildValue("(Oi)", conn, 0) );
+      memcpy(&new_sblob->lo, data, sizeof(ifx_lo_t));
+      if (xid==XID_CLOB)
+        new_sblob->sblob_type = SBLOB_TYPE_CLOB;
+      else
+        new_sblob->sblob_type = SBLOB_TYPE_BLOB;
+      return (PyObject*)new_sblob;
+  } else
+#endif
 #ifdef CLVCHARPTRTYPE
   if (ISCOMPLEXTYPE(type)||ISUDTTYPE(type)) {
     PyObject *buffer;
@@ -1715,7 +1871,8 @@ static PyObject *processOutput(Cursor *cur)
       v = Py_None;
       Py_INCREF(v);
     } else {
-      v = doCopy(var->sqldata, cur->originalType[pos]);
+      v = doCopy(var->sqldata, cur->originalType[pos], cur->originalXid[pos],
+                 cur->conn);
     }
 
     if (cur->rowformat == CURSOR_ROWFORMAT_DICT) {
@@ -1747,6 +1904,30 @@ static PyObject *Connection_cursor(Connection *self, PyObject *args, PyObject *k
   Py_DECREF(a);
   return cur;
 }
+
+#ifdef HAVE_SBLOB
+static PyObject *Connection_Sblob(Connection *self, PyObject *args, PyObject *kwds)
+{
+  PyObject *a, *slob;
+  int i;
+
+  require_open(self);
+
+  a = PyTuple_New(PyTuple_Size(args) + 2);
+  Py_INCREF(self);
+  PyTuple_SET_ITEM(a, 0, (PyObject*)self);
+  PyTuple_SET_ITEM(a, 1, PyInt_FromLong(1));
+  for (i = 0; i < PyTuple_Size(args); ++i) {
+    PyObject *o = PyTuple_GetItem(args, i);
+    Py_INCREF(o);
+    PyTuple_SET_ITEM(a, i+2, o);
+  }
+
+  slob = PyObject_Call((PyObject*)&Sblob_type, a, kwds);
+  Py_DECREF(a);
+  return slob;
+}
+#endif
 
 static void cleanInputBinding(Cursor *cur)
 {
@@ -1803,6 +1984,11 @@ static void deleteOutputBinding(Cursor *cur)
         if (loc->loc_buffer)
           free(loc->loc_buffer);
       }
+#ifdef HAVE_SBLOB
+      if (ISSMARTBLOB(da->sqlvar[i].sqltype,da->sqlvar[i].sqlxid)) {
+        free(da->sqlvar[i].sqldata);
+      }
+#endif
     free(cur->daOut);
     cur->daOut = 0;
   }
@@ -1813,6 +1999,10 @@ static void deleteOutputBinding(Cursor *cur)
   if (cur->originalType) {
     free(cur->originalType);
     cur->originalType = 0;
+  }
+  if (cur->originalXid) {
+    free(cur->originalXid);
+    cur->originalXid = 0;
   }
   if (cur->outputBuffer) {
     free(cur->outputBuffer);
@@ -1918,6 +2108,7 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   self->daIn.sqld = 0; self->daIn.sqlvar = 0;
   self->daOut = 0;
   self->originalType = 0;
+  self->originalXid = 0;
   self->outputBuffer = 0;
   self->indIn = 0;
   self->indOut = 0;
@@ -2657,6 +2848,254 @@ static PyMethodDef globalMethods[] = {
   { NULL }
 };
 
+#ifdef HAVE_SBLOB
+static int Sblob_init(Sblob *self, PyObject *args, PyObject* kwargs)
+{
+  struct Connection_t *conn;
+  int do_create = 0;
+  mint create_flags = 0;
+  mint open_flags = LO_RDWR;
+  int sblob_type = 0;
+  static char* kwdlist[] = {
+    "connection", "do_create", "type", "create_flags", "open_flags", 0
+  };
+  mint result, err;
+
+  if (!PyArg_ParseTupleAndKeywords(
+         args, kwargs, "O!i|iii", kwdlist, &Connection_type, &conn,
+         &do_create, &sblob_type, &create_flags, &open_flags))
+    return -1;
+
+  self->conn = conn;
+  Py_INCREF(conn);
+
+  self->lofd = 0;
+  self->lo_spec = NULL;
+  self->sblob_type = sblob_type;
+  if (do_create) {
+    if (setConnection(self->conn)) return -1;
+    result = ifx_lo_def_create_spec(&self->lo_spec);
+    if (result<0) {
+      is_dberror(self->conn, NULL, "ifx_lo_def_create_spec");
+      return -1;
+    }
+    result = ifx_lo_specset_flags(self->lo_spec, create_flags);
+    if (result<0) {
+      is_dberror(self->conn, NULL, "ifx_lo_specset_flags");
+      return -1;
+    }
+    result = ifx_lo_create(self->lo_spec, open_flags, &self->lo, &err);
+    if (result<0) {
+      is_dberror(self->conn, NULL, "ifx_lo_create");
+      return -1;
+    }
+    self->lofd = result;
+  }
+  return 0;
+}
+
+static void Sblob_dealloc(Sblob *self)
+{
+  if (self->lofd) {
+    ifx_lo_close(self->lofd);
+    self->lofd = 0;
+  }
+  ifx_lo_release(&self->lo);
+  if (self->lo_spec) {
+    ifx_lo_spec_free(self->lo_spec);
+    self->lo_spec = NULL;
+  }
+  self->ob_type->tp_free((PyObject*)self);
+}
+
+static PyObject *Sblob_close(Sblob *self) {
+  if (self->lofd) {
+    ifx_lo_close(self->lofd);
+    self->lofd = 0;
+  }
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+
+static PyObject *Sblob_open(Sblob *self, PyObject *args, PyObject *kwargs)
+{
+  mint flags = 0;
+  static char* kwdlist[] = { "flags", 0 };
+  mint result, err;
+
+  if (self->lofd) {
+    if (error_handle(self->conn, NULL, ExcInterfaceError,
+        PyString_FromString("Sblob is already open")))
+      return NULL;
+  }
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i", kwdlist, &flags))
+    return NULL;
+  result = ifx_lo_open(&self->lo, flags, &err);
+  if (result<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_lo_open");
+  }
+  self->lofd = result;
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+
+static PyObject *Sblob_read(Sblob *self, PyObject *args, PyObject *kwargs)
+{
+  static char* kwdlist[] = { "nbytes", 0 };
+  mint result, err;
+  char *buf;
+  PyObject *py_result;
+  mint buflen;
+  if (!self->lofd) {
+    if (error_handle(self->conn, NULL, ExcInterfaceError,
+        PyString_FromString("Sblob is not open")))
+      return NULL;
+  }
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "i", kwdlist, &buflen))
+    return NULL;
+  buf = PyMem_Malloc(buflen);
+  if (!buf) {
+    return PyErr_NoMemory();
+  }
+  result = ifx_lo_read(self->lofd, buf, buflen, &err);
+  if (result<0) {
+    PyMem_Free(buf);
+    ret_on_dberror(self->conn, NULL, "ifx_lo_read");
+  }
+  py_result = PyString_FromStringAndSize(buf, result);
+  PyMem_Free(buf);
+  return py_result;
+}
+
+static PyObject *Sblob_write(Sblob *self, PyObject *args, PyObject *kwargs)
+{
+  static char* kwdlist[] = { "buf", 0 };
+  mint result, err;
+  char *buf;
+  mint buflen;
+  if (!self->lofd) {
+    if (error_handle(self->conn, NULL, ExcInterfaceError,
+        PyString_FromString("Sblob is not open")))
+      return NULL;
+  }
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "s#", kwdlist, &buf, &buflen))
+    return NULL;
+  result = ifx_lo_write(self->lofd, buf, buflen, &err);
+  if (result<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_lo_write");
+  }
+  return PyInt_FromLong((long)result);
+}
+
+static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs)
+{
+  static char* kwdlist[] = { "offset", "whence", 0 };
+  mint result, err;
+  PyObject *py_offset;
+  PyObject *sitem;
+  char *val, pos_str[30];
+  mint whence;
+  ifx_int8_t offset, seek_pos;
+
+  if (!self->lofd) {
+    if (error_handle(self->conn, NULL, ExcInterfaceError,
+        PyString_FromString("Sblob is not open")))
+      return NULL;
+  }
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Oi", kwdlist,
+                                   &py_offset, &whence))
+    return NULL;
+  
+  sitem = PyObject_Str(py_offset);
+  val = PyString_AS_STRING((PyStringObject*)sitem);
+  result = ifx_int8cvasc(val, strlen(val), &offset);
+  Py_DECREF(sitem);
+  if (result<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_int8cvasc");
+  }
+  if (ifx_lo_seek(self->lofd, &offset, whence, &seek_pos)<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_lo_seek");
+  }
+  if (ifx_int8toasc(&seek_pos, pos_str, 29)<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_int8toasc");
+  }
+  pos_str[29] = 0; 
+  return PyLong_FromString(pos_str, NULL, 10);
+}
+
+static PyObject *Sblob_tell(Sblob *self)
+{
+  ifx_int8_t seek_pos;
+  char pos_str[30];
+
+  if (!self->lofd) {
+    if (error_handle(self->conn, NULL, ExcInterfaceError,
+        PyString_FromString("Sblob is not open")))
+      return NULL;
+  }
+  if (ifx_lo_tell(self->lofd, &seek_pos)<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_lo_tell");
+  }
+  if (ifx_int8toasc(&seek_pos, pos_str, 29)<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_int8toasc");
+  }
+  pos_str[29] = 0; 
+  return PyLong_FromString(pos_str, NULL, 10);
+}
+
+static PyObject *Sblob_stat(Sblob *self)
+{
+  ifx_lo_stat_t *lo_stat;
+  mint result;
+  ifx_int8_t stat_size;
+  char size_str[30];
+  PyObject *size_result;
+  mint atime, ctime, mtime, refcnt;
+  PyObject *atime_result, *ctime_result, *mtime_result;
+
+  if (!self->lofd) {
+    if (error_handle(self->conn, NULL, ExcInterfaceError,
+        PyString_FromString("Sblob is not open")))
+      return NULL;
+  }
+  if (ifx_lo_stat(self->lofd, &lo_stat)<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_lo_stat");
+  }
+  if (ifx_lo_stat_size(lo_stat, &stat_size)<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_lo_stat_size");
+  }
+  if ((atime=ifx_lo_stat_atime(lo_stat))<0) {
+    atime_result = Py_None; Py_INCREF(Py_None);
+  } else {
+    atime_result = db_TimestampFromTicks(NULL,Py_BuildValue("(i)",atime));
+  }
+  if ((ctime=ifx_lo_stat_ctime(lo_stat))<0) {
+    ctime_result = Py_None; Py_INCREF(Py_None);
+  } else {
+    ctime_result = db_TimestampFromTicks(NULL,Py_BuildValue("(i)",ctime));
+  }
+  if ((mtime=ifx_lo_stat_mtime_sec(lo_stat))<0) {
+    mtime_result = Py_None; Py_INCREF(Py_None);
+  } else {
+    mtime_result = db_TimestampFromTicks(NULL,Py_BuildValue("(i)",mtime));
+  }
+  if ((refcnt=ifx_lo_stat_refcnt(lo_stat))<0) {
+    refcnt = 0;
+  }
+  if (ifx_lo_stat_free(lo_stat)<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_lo_stat_free");
+  }
+  if (ifx_int8toasc(&stat_size, size_str, 29)<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_int8toasc");
+  }
+  size_str[29] = 0; 
+  size_result = PyLong_FromString(size_str, NULL, 10);
+  return Py_BuildValue("{sNsNsNsNsi}", "size", size_result,
+    "atime", atime_result, "ctime", ctime_result,
+    "mtime", mtime_result, "refcnt", refcnt);
+}
+#endif
+
 PyDoc_STRVAR(_informixdb_doc,
 "DB-API 2.0 compliant interface for Informix databases.\n");
 
@@ -2719,6 +3158,12 @@ void init_informixdb(void)
   PyType_Ready(&Connection_type);
   PyType_Ready(&DBAPIType_type);
 
+#ifdef HAVE_SBLOB
+  Sblob_type.ob_type = &PyType_Type;
+  PyType_Ready(&Sblob_type);
+  Py_INCREF(&Sblob_type);
+#endif
+
 #ifdef IFX_THREAD
   threadsafety = 1;
 #endif
@@ -2736,6 +3181,37 @@ void init_informixdb(void)
 
   PyModule_AddIntConstant(m, "ROW_AS_TUPLE", CURSOR_ROWFORMAT_TUPLE);
   PyModule_AddIntConstant(m, "ROW_AS_DICT", CURSOR_ROWFORMAT_DICT);
+
+#ifdef HAVE_SBLOB
+#define ExposeIntConstant(x) PyModule_AddIntConstant(m, #x, x)
+  ExposeIntConstant(SBLOB_TYPE_BLOB);
+  ExposeIntConstant(SBLOB_TYPE_CLOB);
+  ExposeIntConstant(LO_OPEN_APPEND);
+  ExposeIntConstant(LO_OPEN_WRONLY);
+  ExposeIntConstant(LO_OPEN_RDONLY);
+  ExposeIntConstant(LO_OPEN_RDWR);
+  ExposeIntConstant(LO_OPEN_DIRTY_READ);
+  ExposeIntConstant(LO_OPEN_RANDOM);
+  ExposeIntConstant(LO_OPEN_SEQUENTIAL);
+  ExposeIntConstant(LO_OPEN_FORWARD);
+  ExposeIntConstant(LO_OPEN_REVERSE);
+  ExposeIntConstant(LO_OPEN_BUFFER);
+  ExposeIntConstant(LO_OPEN_NOBUFFER);
+  ExposeIntConstant(LO_OPEN_NODIRTY_READ);
+  ExposeIntConstant(LO_OPEN_LOCKALL);
+  ExposeIntConstant(LO_OPEN_LOCKRANGE);
+  ExposeIntConstant(LO_ATTR_LOG);
+  ExposeIntConstant(LO_ATTR_NOLOG);
+  ExposeIntConstant(LO_ATTR_DELAY_LOG);
+  ExposeIntConstant(LO_ATTR_KEEP_LASTACCESS_TIME);
+  ExposeIntConstant(LO_ATTR_NOKEEP_LASTACCESS_TIME);
+  ExposeIntConstant(LO_ATTR_HIGH_INTEG);
+  ExposeIntConstant(LO_ATTR_MODERATE_INTEG);
+  ExposeIntConstant(LO_ATTR_TEMP);
+  ExposeIntConstant(LO_SEEK_SET);
+  ExposeIntConstant(LO_SEEK_CUR);
+  ExposeIntConstant(LO_SEEK_END);
+#endif
 
   Py_INCREF(&Connection_type);
   PyModule_AddObject(m, "Connection", (PyObject*)&Connection_type);

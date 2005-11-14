@@ -1121,6 +1121,7 @@ static int ibindSblob(struct sqlvar_struct *var, PyObject *item)
   var->sqldata = (void*)data;
   var->sqllen  = sizeof(ifx_lo_t);
   *var->sqlind = 0;
+  return 1;
 }
 #endif
 
@@ -2994,7 +2995,7 @@ static PyObject *Sblob_write(Sblob *self, PyObject *args, PyObject *kwargs)
 static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs)
 {
   static char* kwdlist[] = { "offset", "whence", 0 };
-  mint result, err;
+  mint result;
   PyObject *py_offset;
   PyObject *sitem;
   char *val, pos_str[30];
@@ -3052,7 +3053,6 @@ static PyObject *Sblob_tell(Sblob *self)
 static PyObject *Sblob_stat(Sblob *self)
 {
   ifx_lo_stat_t *lo_stat;
-  mint result;
   ifx_int8_t stat_size;
   char size_str[30];
   PyObject *size_result;

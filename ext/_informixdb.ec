@@ -1645,6 +1645,14 @@ static PyObject *Cursor_executemany(Cursor *self,
   return Py_None;
 }
 
+static PyObject *CallObjectAndDiscardArgs(PyObject *t, PyObject *a)
+{
+  PyObject *result;
+  result = PyObject_CallObject(t, a);
+  Py_DECREF(a);
+  return result;
+} 
+  
 static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
                                     struct Connection_t *conn)
 {
@@ -1731,7 +1739,7 @@ static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
         }
         pos--;
       }
-      return PyObject_CallObject(IntervalY2MType,
+      return CallObjectAndDiscardArgs(IntervalY2MType,
                Py_BuildValue("(ii)",sign*year,sign*month) );
     }
     else {
@@ -1755,7 +1763,7 @@ static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
         }
         pos--;
       }
-      return PyObject_CallObject(IntervalD2FType,
+      return CallObjectAndDiscardArgs(IntervalD2FType,
                Py_BuildValue("(iii)", sign*day,
                       sign*(3600*hour+60*minute+second), sign*usec) );
     }
@@ -1818,7 +1826,7 @@ static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
 #ifdef HAVE_SBLOB
   if (ISSMARTBLOB(type,xid)) {
       Sblob *new_sblob;
-      new_sblob = (Sblob*)PyObject_CallObject((PyObject*)&Sblob_type,
+      new_sblob = (Sblob*)CallObjectAndDiscardArgs((PyObject*)&Sblob_type,
                Py_BuildValue("(Oi)", conn, 0) );
       memcpy(&new_sblob->lo, data, sizeof(ifx_lo_t));
       if (xid==XID_CLOB)
@@ -3050,6 +3058,15 @@ static PyObject *Sblob_tell(Sblob *self)
   return PyLong_FromString(pos_str, NULL, 10);
 }
 
+static PyObject *maketimestamp(int ticks)
+{
+  PyObject *a, *result;
+  a = Py_BuildValue("(i)",ticks);
+  result = db_TimestampFromTicks(NULL,a);
+  Py_DECREF(a);
+  return result;
+}
+
 static PyObject *Sblob_stat(Sblob *self)
 {
   ifx_lo_stat_t *lo_stat;
@@ -3071,21 +3088,9 @@ static PyObject *Sblob_stat(Sblob *self)
   if (ifx_lo_stat_size(lo_stat, &stat_size)<0) {
     ret_on_dberror(self->conn, NULL, "ifx_lo_stat_size");
   }
-  if ((atime=ifx_lo_stat_atime(lo_stat))<0) {
-    atime_result = Py_None; Py_INCREF(Py_None);
-  } else {
-    atime_result = db_TimestampFromTicks(NULL,Py_BuildValue("(i)",atime));
-  }
-  if ((ctime=ifx_lo_stat_ctime(lo_stat))<0) {
-    ctime_result = Py_None; Py_INCREF(Py_None);
-  } else {
-    ctime_result = db_TimestampFromTicks(NULL,Py_BuildValue("(i)",ctime));
-  }
-  if ((mtime=ifx_lo_stat_mtime_sec(lo_stat))<0) {
-    mtime_result = Py_None; Py_INCREF(Py_None);
-  } else {
-    mtime_result = db_TimestampFromTicks(NULL,Py_BuildValue("(i)",mtime));
-  }
+  atime=ifx_lo_stat_atime(lo_stat);
+  ctime=ifx_lo_stat_ctime(lo_stat);
+  mtime=ifx_lo_stat_mtime_sec(lo_stat);
   if ((refcnt=ifx_lo_stat_refcnt(lo_stat))<0) {
     refcnt = 0;
   }
@@ -3094,6 +3099,21 @@ static PyObject *Sblob_stat(Sblob *self)
   }
   if (ifx_int8toasc(&stat_size, size_str, 29)<0) {
     ret_on_dberror(self->conn, NULL, "ifx_int8toasc");
+  }
+  if (atime<0) {
+    atime_result = Py_None; Py_INCREF(Py_None);
+  } else {
+    atime_result = maketimestamp(atime);
+  }
+  if (ctime<0) {
+    ctime_result = Py_None; Py_INCREF(Py_None);
+  } else {
+    ctime_result = maketimestamp(ctime);
+  }
+  if (mtime<0) {
+    mtime_result = Py_None; Py_INCREF(Py_None);
+  } else {
+    mtime_result = maketimestamp(mtime);
   }
   size_str[29] = 0; 
   size_result = PyLong_FromString(size_str, NULL, 10);

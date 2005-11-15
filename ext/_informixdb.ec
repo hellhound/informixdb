@@ -2909,7 +2909,6 @@ static void Sblob_dealloc(Sblob *self)
     ifx_lo_close(self->lofd);
     self->lofd = 0;
   }
-  ifx_lo_release(&self->lo);
   if (self->lo_spec) {
     ifx_lo_spec_free(self->lo_spec);
     self->lo_spec = NULL;

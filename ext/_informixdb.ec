@@ -2906,13 +2906,17 @@ static int Sblob_init(Sblob *self, PyObject *args, PyObject* kwargs)
 static void Sblob_dealloc(Sblob *self)
 {
   if (self->lofd) {
-    ifx_lo_close(self->lofd);
+    if (self->conn) {
+      if (setConnection(self->conn)) PyErr_Clear();
+      else ifx_lo_close(self->lofd);
+    }
     self->lofd = 0;
   }
   if (self->lo_spec) {
     ifx_lo_spec_free(self->lo_spec);
     self->lo_spec = NULL;
   }
+  Py_XDECREF(self->conn);
   self->ob_type->tp_free((PyObject*)self);
 }
 

@@ -110,6 +110,7 @@ static PyObject *ExcNotSupportedError;
 
 static PyObject *IntervalY2MType;
 static PyObject *IntervalD2FType;
+static PyObject *DataRowType;
 
 PyDoc_STRVAR(ExcWarning_doc,
 "Exception class for SQL warnings.\n\n\
@@ -298,7 +299,11 @@ static PyTypeObject Sblob_type = {
 
 /************************* Cursors *************************/
 
-enum CURSOR_ROWFORMAT { CURSOR_ROWFORMAT_TUPLE, CURSOR_ROWFORMAT_DICT };
+enum CURSOR_ROWFORMAT {
+  CURSOR_ROWFORMAT_TUPLE,
+  CURSOR_ROWFORMAT_DICT,
+  CURSOR_ROWFORMAT_ROWOBJ
+};
 
 typedef struct Cursor_t
 {
@@ -1865,7 +1870,8 @@ static PyObject *processOutput(Cursor *cur)
   PyObject *row;
   int pos;
   struct sqlvar_struct *var;
-  if (cur->rowformat == CURSOR_ROWFORMAT_DICT) {
+  if (cur->rowformat==CURSOR_ROWFORMAT_DICT ||
+      cur->rowformat==CURSOR_ROWFORMAT_ROWOBJ) {
     row = PyDict_New();
   } else {
     row = PyTuple_New(cur->daOut->sqld);
@@ -1884,11 +1890,15 @@ static PyObject *processOutput(Cursor *cur)
                  cur->conn);
     }
 
-    if (cur->rowformat == CURSOR_ROWFORMAT_DICT) {
+    if (cur->rowformat==CURSOR_ROWFORMAT_DICT ||
+        cur->rowformat==CURSOR_ROWFORMAT_ROWOBJ) {
       PyDict_SetItemString(row, var->sqlname, v);
     } else {
       PyTuple_SET_ITEM(row, pos, v);
     }
+  }
+  if (cur->rowformat == CURSOR_ROWFORMAT_ROWOBJ) {
+    row = CallObjectAndDiscardArgs(DataRowType, Py_BuildValue("(N)", row) );
   }
   return row;
 }
@@ -2137,10 +2147,12 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   self->messages = PyList_New(0);
   self->errorhandler = conn->errorhandler;
   Py_INCREF(self->errorhandler);
+  self->rowformat = CURSOR_ROWFORMAT_TUPLE;
   if (rowformat == CURSOR_ROWFORMAT_DICT) {
     self->rowformat = CURSOR_ROWFORMAT_DICT;
-  } else {
-    self->rowformat = CURSOR_ROWFORMAT_TUPLE;
+  }
+  if (rowformat == CURSOR_ROWFORMAT_ROWOBJ) {
+    self->rowformat = CURSOR_ROWFORMAT_ROWOBJ;
   }
 
   return 0;
@@ -3211,6 +3223,7 @@ void init_informixdb(void)
 
   PyModule_AddIntConstant(m, "ROW_AS_TUPLE", CURSOR_ROWFORMAT_TUPLE);
   PyModule_AddIntConstant(m, "ROW_AS_DICT", CURSOR_ROWFORMAT_DICT);
+  PyModule_AddIntConstant(m, "ROW_AS_OBJECT", CURSOR_ROWFORMAT_ROWOBJ);
 
 #ifdef HAVE_SBLOB
 #define ExposeIntConstant(x) PyModule_AddIntConstant(m, #x, x)
@@ -3255,8 +3268,10 @@ void init_informixdb(void)
                       informixdbmdict, "IntervalYearToMonth");
   IntervalD2FType = PyDict_GetItemString(
                       informixdbmdict, "IntervalDayToFraction");
+  DataRowType = PyDict_GetItemString(informixdbmdict, "Row");
   Py_INCREF(IntervalY2MType);
   Py_INCREF(IntervalD2FType);
+  Py_INCREF(DataRowType);
 
   PyDateTime_IMPORT;
 

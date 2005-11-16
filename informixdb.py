@@ -46,6 +46,11 @@ For more information on DB-API 2.0, see
 http://www.python.org/peps/pep-0249.html
 """
 
+class Row(object):
+  def __init__(self, d): self.__dict__ = d
+  def __repr__(self): return repr(self.__dict__)
+  def __str__(self): return str(self.__dict__)
+
 class IntervalYearToMonth(object):
   def __init__(self, years=0, months=0):
     self._months = 12*years+months

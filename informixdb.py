@@ -47,7 +47,7 @@ http://www.python.org/peps/pep-0249.html
 """
 
 class Row(object):
-  def __init__(self, d): self.__dict__ = d
+  def __init__(self, d): self.__dict__.update(d)
   def __repr__(self): return repr(self.__dict__)
   def __str__(self): return str(self.__dict__)
 

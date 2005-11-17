@@ -1,7 +1,7 @@
 /************************************************************************
  *                Copyright (c) 1997 by IV DocEye AB
  *             Copyright (c) 1999 by Stephen J. Turner
- *               Copyright (c) 1999 by Carsten Haese
+ *               Copyright (c) 2005 by Carsten Haese
  *
  * By obtaining, using, and/or copying this software and/or its
  * associated documentation, you agree that you have read, understood,
@@ -233,6 +233,8 @@ static PyObject *Sblob_write(Sblob *self, PyObject *args, PyObject *kwargs);
 static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs);
 static PyObject *Sblob_tell(Sblob *self);
 static PyObject *Sblob_stat(Sblob *self);
+static PyObject *Sblob_specget(Sblob *self, void *closure);
+static int Sblob_alter(Sblob *self, PyObject *value, void *closure);
 
 static PyMethodDef Sblob_methods[] = {
   { "close", (PyCFunction)Sblob_close, METH_NOARGS },
@@ -249,7 +251,25 @@ static PyMemberDef Sblob_members[] = {
   { NULL }
 };
 
+enum SBLOB_CSPECS {
+  SBLOB_CSPEC_ESTBYTES=1,
+  SBLOB_CSPEC_EXTSZ,
+  SBLOB_CSPEC_FLAGS,
+  SBLOB_CSPEC_MAXBYTES,
+  SBLOB_CSPEC_SBSPACE
+} ;
+
 static PyGetSetDef Sblob_properties[] = {
+  { "estbytes", (getter)Sblob_specget, (setter)NULL, "",
+                (void*)SBLOB_CSPEC_ESTBYTES },
+  { "extsz",    (getter)Sblob_specget, (setter)Sblob_alter, "",
+                (void*)SBLOB_CSPEC_EXTSZ },
+  { "flags",    (getter)Sblob_specget, (setter)Sblob_alter, "",
+                (void*)SBLOB_CSPEC_FLAGS },
+  { "maxbytes", (getter)Sblob_specget, (setter)NULL, "",
+                (void*)SBLOB_CSPEC_MAXBYTES },
+  { "sbspace",  (getter)Sblob_specget, (setter)NULL, "",
+                (void*)SBLOB_CSPEC_SBSPACE },
   { NULL }
 };
 
@@ -2871,6 +2891,18 @@ static PyMethodDef globalMethods[] = {
 };
 
 #ifdef HAVE_SBLOB
+static int makeint8(PyObject *in, ifx_int8_t *out)
+{
+  PyObject *sitem;
+  char *val;
+  mint result;
+  sitem = PyObject_Str(in);
+  val = PyString_AS_STRING((PyStringObject*)sitem);
+  result = ifx_int8cvasc(val, strlen(val), out);
+  Py_DECREF(sitem);
+  return result;
+}
+
 static int Sblob_init(Sblob *self, PyObject *args, PyObject* kwargs)
 {
   struct Connection_t *conn;
@@ -2878,14 +2910,22 @@ static int Sblob_init(Sblob *self, PyObject *args, PyObject* kwargs)
   mint create_flags = 0;
   mint open_flags = LO_RDWR;
   int sblob_type = 0;
+  char *col_info = NULL;
+  char *sbspace = NULL;
+  mint extsz = 0;
+  PyObject *py_estbytes = NULL, *py_maxbytes = NULL;
+  ifx_int8_t estbytes, maxbytes;
+
   static char* kwdlist[] = {
-    "connection", "do_create", "type", "create_flags", "open_flags", 0
+    "connection", "do_create", "type", "create_flags", "open_flags", 
+    "col_info", "sbspace", "extsz", "estbytes", "maxbytes", 0
   };
   mint result, err;
 
   if (!PyArg_ParseTupleAndKeywords(
-         args, kwargs, "O!i|iii", kwdlist, &Connection_type, &conn,
-         &do_create, &sblob_type, &create_flags, &open_flags))
+         args, kwargs, "O!i|iiissiOO", kwdlist, &Connection_type, &conn,
+         &do_create, &sblob_type, &create_flags, &open_flags, &col_info,
+         &sbspace, &extsz, &py_estbytes, &py_maxbytes))
     return -1;
 
   self->conn = conn;
@@ -2901,10 +2941,49 @@ static int Sblob_init(Sblob *self, PyObject *args, PyObject* kwargs)
       is_dberror(self->conn, NULL, "ifx_lo_def_create_spec");
       return -1;
     }
-    result = ifx_lo_specset_flags(self->lo_spec, create_flags);
-    if (result<0) {
-      is_dberror(self->conn, NULL, "ifx_lo_specset_flags");
-      return -1;
+    if (col_info && *col_info) {
+      if (ifx_lo_col_info(col_info, self->lo_spec)<0) {
+        is_dberror(self->conn, NULL, "ifx_lo_col_info");
+        return -1;
+      }
+    }
+    if (sbspace && *sbspace) {
+      if (ifx_lo_specset_sbspace(self->lo_spec, sbspace)<0) {
+        is_dberror(self->conn, NULL, "ifx_lo_specset_sbspace");
+        return -1;
+      }
+    }
+    if (extsz>0) {
+      if (ifx_lo_specset_extsz(self->lo_spec, extsz)<0) {
+        is_dberror(self->conn, NULL, "ifx_lo_specset_extsz");
+        return -1;
+      }
+    }
+    if (py_estbytes) {
+      if (makeint8(py_estbytes, &estbytes)<0) {
+        PyErr_SetString(PyExc_TypeError, "non-numeric estbytes");
+        return -1;
+      }
+      if (ifx_lo_specset_estbytes(self->lo_spec, &estbytes)<0) {
+        is_dberror(self->conn, NULL, "ifx_lo_specset_estbytes");
+        return -1;
+      }
+    }
+    if (py_maxbytes) {
+      if (makeint8(py_maxbytes, &maxbytes)<0) {
+        PyErr_SetString(PyExc_TypeError, "non-numeric maxbytes");
+        return -1;
+      }
+      if (ifx_lo_specset_maxbytes(self->lo_spec, &maxbytes)<0) {
+        is_dberror(self->conn, NULL, "ifx_lo_specset_maxbytes");
+        return -1;
+      }
+    }
+    if (create_flags) {
+      if (ifx_lo_specset_flags(self->lo_spec, create_flags)<0) {
+        is_dberror(self->conn, NULL, "ifx_lo_specset_flags");
+        return -1;
+      }
     }
     result = ifx_lo_create(self->lo_spec, open_flags, &self->lo, &err);
     if (result<0) {
@@ -3021,8 +3100,7 @@ static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs)
   static char* kwdlist[] = { "offset", "whence", 0 };
   mint result;
   PyObject *py_offset;
-  PyObject *sitem;
-  char *val, pos_str[30];
+  char pos_str[30];
   mint whence = LO_SEEK_SET;
   ifx_int8_t offset, seek_pos;
 
@@ -3035,12 +3113,9 @@ static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs)
                                    &py_offset, &whence))
     return NULL;
   
-  sitem = PyObject_Str(py_offset);
-  val = PyString_AS_STRING((PyStringObject*)sitem);
-  result = ifx_int8cvasc(val, strlen(val), &offset);
-  Py_DECREF(sitem);
-  if (result<0) {
-    ret_on_dberror(self->conn, NULL, "ifx_int8cvasc");
+  if (makeint8(py_offset, &offset)<0) {
+    PyErr_SetString(PyExc_TypeError, "non-numeric offset");
+    return NULL;
   }
   if (setConnection(self->conn)) return NULL;
   if (ifx_lo_seek(self->lofd, &offset, whence, &seek_pos)<0) {
@@ -3136,6 +3211,117 @@ static PyObject *Sblob_stat(Sblob *self)
   return Py_BuildValue("{sNsNsNsNsi}", "size", size_result,
     "atime", atime_result, "ctime", ctime_result,
     "mtime", mtime_result, "refcnt", refcnt);
+}
+
+static PyObject *Sblob_specget(Sblob *self, void *closure)
+{
+  ifx_lo_stat_t *lo_stat;
+  ifx_lo_create_spec_t *lo_spec;
+  ifx_int8_t int8result;
+  mint mintresult;
+  char buf[129];
+
+  if (!self->lofd) {
+    if (error_handle(self->conn, NULL, ExcInterfaceError,
+        PyString_FromString("Sblob is not open")))
+      return NULL;
+  }
+  if (setConnection(self->conn)) return NULL;
+  if (ifx_lo_stat(self->lofd, &lo_stat)<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_lo_stat");
+  }
+  lo_spec = ifx_lo_stat_cspec(lo_stat);
+  if (!lo_spec) {
+    ret_on_dberror(self->conn, NULL, "ifx_lo_stat_cspec");
+  }
+  switch ((int)closure) {
+    case SBLOB_CSPEC_ESTBYTES:
+      if (ifx_lo_specget_estbytes(lo_spec, &int8result)<0) {
+        ret_on_dberror(self->conn, NULL, "ifx_lo_specget_estbytes");
+      }
+      break;
+    case SBLOB_CSPEC_MAXBYTES:
+      if (ifx_lo_specget_maxbytes(lo_spec, &int8result)<0) {
+        ret_on_dberror(self->conn, NULL, "ifx_lo_specget_maxbytes");
+      }
+      break;
+    case SBLOB_CSPEC_EXTSZ:
+      if ((mintresult=ifx_lo_specget_extsz(lo_spec))<0) {
+        ret_on_dberror(self->conn, NULL, "ifx_lo_specget_extsz");
+      }
+      break;
+    case SBLOB_CSPEC_FLAGS:
+      if ((mintresult=ifx_lo_specget_flags(lo_spec))<0) {
+        ret_on_dberror(self->conn, NULL, "ifx_lo_specget_flags");
+      }
+      break;
+      break;
+    case SBLOB_CSPEC_SBSPACE:
+      if (ifx_lo_specget_sbspace(lo_spec, buf, 128)<0) {
+        ret_on_dberror(self->conn, NULL, "ifx_lo_specget_sbspace");
+      }
+      break;
+  }
+  if (ifx_lo_stat_free(lo_stat)<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_lo_stat_free");
+  }
+  switch ((int)closure) {
+    case SBLOB_CSPEC_EXTSZ:
+    case SBLOB_CSPEC_FLAGS:
+      return PyInt_FromLong((long)mintresult); break;
+    case SBLOB_CSPEC_SBSPACE:
+      return PyString_FromString(buf); break;
+    case SBLOB_CSPEC_ESTBYTES:
+    case SBLOB_CSPEC_MAXBYTES:
+      if (ifx_int8toasc(&int8result, buf, 29)<0) {
+        ret_on_dberror(self->conn, NULL, "ifx_int8toasc");
+      }
+      buf[29] = 0; 
+      return PyLong_FromString(buf, NULL, 10);
+      break;
+  }
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+
+static int Sblob_alter(Sblob *self, PyObject *value, void *closure)
+{
+  ifx_lo_stat_t *lo_stat;
+  ifx_lo_create_spec_t *lo_spec;
+  mint mintval;
+
+  if (!self->lofd) {
+    if (error_handle(self->conn, NULL, ExcInterfaceError,
+        PyString_FromString("Sblob is not open")))
+      return 1;
+  }
+  if (setConnection(self->conn)) return 1;
+  if (ifx_lo_stat(self->lofd, &lo_stat)<0) {
+    if (is_dberror(self->conn, NULL, "ifx_lo_stat")) return 1;
+  }
+  mintval = PyInt_AsLong(value);
+  if (PyErr_Occurred()) return 1;
+  lo_spec = ifx_lo_stat_cspec(lo_stat);
+  if (!lo_spec) {
+    if (is_dberror(self->conn, NULL, "ifx_lo_stat_cspec")) return 1;
+  }
+  if ((long)closure==SBLOB_CSPEC_EXTSZ) {
+    if (ifx_lo_specset_extsz(lo_spec, mintval)<0) {
+      if (is_dberror(self->conn, NULL, "ifx_lo_specset_extsz")) return 1;
+    }
+  }
+  if ((long)closure==SBLOB_CSPEC_FLAGS) {
+    if (ifx_lo_specset_flags(lo_spec, mintval)<0) {
+      if (is_dberror(self->conn, NULL, "ifx_lo_specset_flags")) return 1;
+    }
+  }
+  if (ifx_lo_alter(&self->lo, lo_spec)<0) {
+    if (is_dberror(self->conn, NULL, "ifx_lo_alter")) return 1;
+  }
+  if (ifx_lo_stat_free(lo_stat)<0) {
+    if (is_dberror(self->conn, NULL, "ifx_lo_stat_free")) return 1;
+  }
+  return 0;
 }
 #endif
 

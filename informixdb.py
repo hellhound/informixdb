@@ -128,7 +128,22 @@ from _informixdb import *
 
 # promote the class definitions of _informixdb.Cursor and
 # _informixdb.Connection into this namespace so that help(informixdb)
-# sees their doc strings.
+# sees their doc strings. Also make it impossible for the user to try
+# to instantiate these classes directly.
 from _informixdb import Cursor as _Cursor, Connection as _Connection
-class Cursor(_Cursor): pass
-class Connection(_Connection): pass
+class Cursor(_Cursor):
+  def __new__(self, *args, **kwargs):
+    raise InterfaceError, "Use Connection.cursor() to instantiate a cursor."
+del _Cursor
+class Connection(_Connection):
+  def __new__(self, *args, **kwargs):
+    raise InterfaceError, "Use connect() to instantiate a connection."
+del _Connection
+try:
+  # Same for Sblobs if we have support for them in _informixdb
+  from _informixdb import Sblob as _Sblob
+  class Sblob(_Sblob):
+    def __new__(self, *args, **kwargs):
+      raise InterfaceError, "Use Connection.Sblob() to instantiate an Sblob."
+  del _Sblob
+except: pass

@@ -3255,6 +3255,8 @@ void init_informixdb(void)
   ExposeIntConstant(LO_SEEK_SET);
   ExposeIntConstant(LO_SEEK_CUR);
   ExposeIntConstant(LO_SEEK_END);
+  Py_INCREF(&Sblob_type);
+  PyModule_AddObject(m, "Sblob", (PyObject*)&Sblob_type);
 #endif
 
   Py_INCREF(&Connection_type);

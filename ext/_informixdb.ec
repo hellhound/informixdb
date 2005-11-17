@@ -1681,7 +1681,7 @@ static PyObject *CallObjectAndDiscardArgs(PyObject *t, PyObject *a)
 static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
                                     struct Connection_t *conn)
 {
-  switch(type){
+  switch(type & SQLTYPE){
   case SQLDATE:
   {
     short mdy_date[3];

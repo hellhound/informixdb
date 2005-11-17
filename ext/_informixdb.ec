@@ -1893,6 +1893,7 @@ static PyObject *processOutput(Cursor *cur)
     if (cur->rowformat==CURSOR_ROWFORMAT_DICT ||
         cur->rowformat==CURSOR_ROWFORMAT_ROWOBJ) {
       PyDict_SetItemString(row, var->sqlname, v);
+      Py_DECREF(v);
     } else {
       PyTuple_SET_ITEM(row, pos, v);
     }

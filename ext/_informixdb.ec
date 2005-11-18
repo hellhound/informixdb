@@ -1869,22 +1869,11 @@ static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
 #endif
 #ifdef HAVE_UDT
   if (ISCOMPLEXTYPE(type)||ISUDTTYPE(type)) {
-    PyObject *buffer;
-    int lvcharlen = ifx_var_getlen(&data);
-    void *lvcharbuf = ifx_var_getdata(&data);
-    char *b_mem;
-    int b_len;
-
-    buffer = PyBuffer_New(lvcharlen);
-
-    if (PyObject_AsWriteBuffer(buffer, (void**)&b_mem, &b_len) == -1) {
-      Py_DECREF(buffer);
-      return NULL;
-    }
-
-    memcpy(b_mem, lvcharbuf, b_len);
+    PyObject *result;
+    char *lvcharbuf = ifx_var_getdata(&data);
+    result = PyString_FromString(lvcharbuf);
     ifx_var_dealloc(&data);
-    return buffer;
+    return result;
   }
 #endif
   Py_INCREF(Py_None);

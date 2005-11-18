@@ -60,6 +60,12 @@
 #undef HAVE_SBLOB
 #endif
 
+#ifdef SQLUDTVAR
+#define HAVE_UDT
+#else
+#undef HAVE_UDT
+#endif
+
 #if HAVE_C_DATETIME == 1
   /* Python and Informix both have a datetime.h, the Informix header is
    * included above because it comes first in the include path. We manually
@@ -1075,7 +1081,7 @@ static int ibindString(struct sqlvar_struct *var, PyObject *item)
   sitem = PyObject_Str(item);
   val = PyString_AS_STRING((PyStringObject*)sitem);
   n = strlen(val);
-EXEC SQL ifdef SQLLVARCHAR;
+#ifdef HAVE_UDT
   if (n >= 32768) {
     /* use lvarchar* instead */
     EXEC SQL BEGIN DECLARE SECTION;
@@ -1095,7 +1101,7 @@ EXEC SQL ifdef SQLLVARCHAR;
     free( data );
   }
   else
-EXEC SQL endif;
+#endif
   {
     var->sqltype = CSTRINGTYPE;
     var->sqldata = malloc(n+1);
@@ -1341,7 +1347,7 @@ static void bindOutput(Cursor *cur)
           ; /* do nothing */
         else
 #endif
-#ifdef CLVCHARPTRTYPE
+#ifdef HAVE_UDT
         if (ISCOMPLEXTYPE(var->sqltype) || ISUDTTYPE(var->sqltype))
           var->sqltype = CLVCHARPTRTYPE;
         else
@@ -1380,7 +1386,7 @@ static void bindOutput(Cursor *cur)
       loc->loc_oflags = 0;
       loc->loc_mflags = 0;
     }
-EXEC SQL ifdef SQLLVARCHAR;
+#ifdef HAVE_UDT
     else if (var->sqltype == CLVCHARPTRTYPE )
     {
       exec sql begin declare section;
@@ -1395,7 +1401,7 @@ EXEC SQL ifdef SQLLVARCHAR;
       var->sqldata = *currentlvarcharptr;
       var->sqllen  = sizeof(void *);
     }
-EXEC SQL endif;
+#endif
     else {
       var->sqldata = bufp;
       bufp += var->sqllen;
@@ -1861,7 +1867,7 @@ static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
       return (PyObject*)new_sblob;
   } else
 #endif
-#ifdef CLVCHARPTRTYPE
+#ifdef HAVE_UDT
   if (ISCOMPLEXTYPE(type)||ISUDTTYPE(type)) {
     PyObject *buffer;
     int lvcharlen = ifx_var_getlen(&data);
@@ -1983,7 +1989,7 @@ static void cleanInputBinding(Cursor *cur)
             free(loc->loc_buffer);
           }
         }
-#ifdef SQLUDTVAR
+#ifdef HAVE_UDT
         if (da->sqlvar[i].sqltype == SQLUDTVAR) {
           ifx_var_dealloc((void**)&(da->sqlvar[i].sqldata));
         }

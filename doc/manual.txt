@@ -3,8 +3,8 @@
 ==========================
 
 :Authors: Daniel Smertnig
-:Version: informixdb 2.0
-:Date: 2005-10-22
+:Version: informixdb 2.1
+:Date: 2005-11-17
 :Homepage: `InformixDB on Sourceforge`_
 
 .. contents:: InformixDB
@@ -14,6 +14,10 @@ Introduction
 
 InformixDB is a Python extension module that provides a way to connect to an
 Informix database via Python's Database API 2.0 [#pep249]_.
+
+This document describes versions 2.0 and up of InformixDB. Features that are
+not present in version 2.0 are identified by indicating the version in which
+they were implemented.
 
 Here's a quick example to get started::
 
@@ -146,6 +150,15 @@ returned. This must be specified when the `Cursor` is created::
     >>> dictcur.execute("SELECT * FROM names")
     >>> dictcur.fetchone()
     {'age': 34, 'last': 'duck', 'first': 'donald'}
+
+`New in version 2.1`: Rows can also be returned as objects whose attributes
+correspond to column names::
+
+    >>> objcur = conn.cursor(rowformat = informixdb.ROW_AS_OBJECT)
+    >>> objcur.execute("SELECT * FROM names")
+    >>> row = objcur.fetchone()
+    >>> print row.age
+    34
 
 Describing result sets
 ,,,,,,,,,,,,,,,,,,,,,,
@@ -298,6 +311,27 @@ InformixDB:
     ``informixdb.Timestamp(year,month,day,hour=0,minute=0,second=0[,microsecond=0]``
     or ``informixdb.TimestampFromTicks(ticks)`` should be used to create
     database independent time or timestamp (i.e. ``DATETIME``) values.
+
+``INTERVAL`` (`new in version 2.1`)
+    `informixdb.IntervalYearToMonth` or `informixdb.IntervalDayToFraction`
+    depending on the interval's precision. Interval instances support certain
+    arithmetic operations, such as adding to or subtracting from a datetime,
+    adding to or subtracting from another compatible interval, and scaling by
+    a factor.
+
+``INT8``, ``SERIAL8`` (IDS) (`new in version 2.1`)
+    `long`
+
+``BLOB``, ``CLOB`` (IDS) (`new in version 2.1`)
+    `informixdb.Sblob`; To insert (or update) a Smart Large Object into a
+    database column, you need to create an Sblob instance by calling the
+    Sblob() method of the connection to which the Sblob should belong.
+    Once an Sblob instance is either created or fetched, it provides a
+    file-like interface for reading and writing its data.
+
+extended types, user-defined types (IDS) (`new in version 2.1`)
+    Complex and opaque types are mapped to their string representation.
+    Distinct types are mapped like the type from which they are derived.
 
 ``NULL``
     SQL ``NULL`` is represented by Python's ``None`` when binding parameters

@@ -239,6 +239,7 @@ static PyObject *Sblob_write(Sblob *self, PyObject *args, PyObject *kwargs);
 static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs);
 static PyObject *Sblob_tell(Sblob *self);
 static PyObject *Sblob_stat(Sblob *self);
+static PyObject *Sblob_truncate(Sblob *self, PyObject *args, PyObject *kwargs);
 static PyObject *Sblob_specget(Sblob *self, void *closure);
 static int Sblob_alter(Sblob *self, PyObject *value, void *closure);
 
@@ -250,6 +251,7 @@ static PyMethodDef Sblob_methods[] = {
   { "seek", (PyCFunction)Sblob_seek, METH_VARARGS|METH_KEYWORDS },
   { "tell", (PyCFunction)Sblob_tell, METH_NOARGS },
   { "stat", (PyCFunction)Sblob_stat, METH_NOARGS },
+  { "truncate", (PyCFunction)Sblob_truncate, METH_VARARGS|METH_KEYWORDS },
   { NULL }
 };
 
@@ -3093,7 +3095,6 @@ static PyObject *Sblob_write(Sblob *self, PyObject *args, PyObject *kwargs)
 static PyObject *Sblob_seek(Sblob *self, PyObject *args, PyObject *kwargs)
 {
   static char* kwdlist[] = { "offset", "whence", 0 };
-  mint result;
   PyObject *py_offset;
   char pos_str[30];
   mint whence = LO_SEEK_SET;
@@ -3208,12 +3209,38 @@ static PyObject *Sblob_stat(Sblob *self)
     "mtime", mtime_result, "refcnt", refcnt);
 }
 
+static PyObject *Sblob_truncate(Sblob *self, PyObject *args, PyObject *kwargs)
+{
+  static char* kwdlist[] = { "offset", 0 };
+  PyObject *py_offset;
+  ifx_int8_t offset;
+
+  if (!self->lofd) {
+    if (error_handle(self->conn, NULL, ExcInterfaceError,
+        PyString_FromString("Sblob is not open")))
+      return NULL;
+  }
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O", kwdlist, &py_offset))
+    return NULL;
+  
+  if (makeint8(py_offset, &offset)<0) {
+    PyErr_SetString(PyExc_TypeError, "non-numeric offset");
+    return NULL;
+  }
+  if (setConnection(self->conn)) return NULL;
+  if (ifx_lo_truncate(self->lofd, &offset)<0) {
+    ret_on_dberror(self->conn, NULL, "ifx_lo_truncate");
+  }
+  Py_INCREF(Py_None);
+  return Py_None;
+}
+
 static PyObject *Sblob_specget(Sblob *self, void *closure)
 {
   ifx_lo_stat_t *lo_stat;
   ifx_lo_create_spec_t *lo_spec;
   ifx_int8_t int8result;
-  mint mintresult;
+  mint mintresult=0;
   char buf[129];
 
   if (!self->lofd) {

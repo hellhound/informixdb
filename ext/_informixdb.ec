@@ -355,6 +355,10 @@ typedef struct Cursor_t
   long rowcount;
   int arraysize;
   int rowformat;
+  int is_hold;
+  int is_scroll;
+  int pending_scroll;
+  int scroll_value;
   PyObject *messages;
   PyObject *errorhandler;
 } Cursor;
@@ -367,6 +371,7 @@ static PyObject* Cursor_executemany(Cursor *self, PyObject *args, PyObject *kwds
 static PyObject* Cursor_fetchone(Cursor *self);
 static PyObject* Cursor_fetchmany(Cursor *self, PyObject *args, PyObject *kwds);
 static PyObject* Cursor_fetchall(Cursor *self);
+static PyObject* Cursor_scroll(Cursor *self, PyObject *args, PyObject *kwds);
 static PyObject* Cursor_setinputsizes(Cursor *self, PyObject *args, PyObject *kwds);
 static PyObject* Cursor_setoutputsize(Cursor *self, PyObject *args, PyObject *kwds);
 static PyObject* Cursor_callproc(Cursor *self, PyObject *args, PyObject *kwds);
@@ -474,6 +479,7 @@ static PyMethodDef Cursor_methods[] = {
     Cursor_fetchmany_doc },
   { "fetchall", (PyCFunction)Cursor_fetchall, METH_NOARGS,
     Cursor_fetchall_doc },
+  { "scroll", (PyCFunction)Cursor_scroll, METH_VARARGS|METH_KEYWORDS },
   { "setinputsizes", (PyCFunction)Cursor_setinputsizes, METH_VARARGS|METH_KEYWORDS,
     Cursor_setinputsizes_doc },
   { "setoutputsize", (PyCFunction)Cursor_setoutputsize, METH_VARARGS|METH_KEYWORDS,
@@ -1474,12 +1480,23 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
 
     if (self->stype == 0 || self->stype == SQ_EXECPROC) {
       bindOutput(self);
-
-      EXEC SQL DECLARE :cursorName CURSOR FOR :queryName;
+      switch (self->is_hold + 2*self->is_scroll) {
+        case 3:
+          EXEC SQL DECLARE :cursorName SCROLL CURSOR WITH HOLD FOR :queryName;
+          break;
+        case 2:
+          EXEC SQL DECLARE :cursorName SCROLL CURSOR FOR :queryName; break;
+        case 1:
+          EXEC SQL DECLARE :cursorName CURSOR WITH HOLD FOR :queryName; break;
+        case 0:
+          EXEC SQL DECLARE :cursorName CURSOR FOR :queryName; break;
+      }
       ret_on_dberror_cursor(self, "DECLARE");
       EXEC SQL FREE :queryName;
       ret_on_dberror_cursor(self, "FREE");
       self->state = 2;
+      self->pending_scroll = 0;
+      self->scroll_value = 0;
     } else {
       free(self->daOut);
       self->daOut = NULL;
@@ -2129,12 +2146,13 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   Connection *conn;
   char *name = NULL;
   int rowformat = CURSOR_ROWFORMAT_TUPLE;
+  int is_scroll = 0;
+  int is_hold = 0;
+  static char* kwdlist[] = { "connection", "name", "rowformat",
+                             "scroll", "hold", 0 };
 
-  static char* kwdlist[] = { "connection", "name", "rowformat", 0 };
-
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|si", kwdlist,
-                                   &Connection_type, &conn,
-                                   &name, &rowformat))
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|siii", kwdlist,
+        &Connection_type, &conn, &name, &rowformat, &is_scroll, &is_hold))
     return -1;
 
   Py_INCREF(Py_None);
@@ -2152,6 +2170,10 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   self->parmIdx = 0;
   self->stype = -1;
   self->op = 0;
+  self->is_hold = 0;
+  self->is_scroll = 0;
+  self->pending_scroll = 0;
+  self->scroll_value = 0;
   if (name) {
     self->cursorName = strdup(name);
   } else {
@@ -2172,7 +2194,8 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   if (rowformat == CURSOR_ROWFORMAT_ROWOBJ) {
     self->rowformat = CURSOR_ROWFORMAT_ROWOBJ;
   }
-
+  if (is_scroll) self->is_scroll = 1;
+  if (is_hold) self->is_hold = 1;
   return 0;
 }
 
@@ -2211,7 +2234,28 @@ static PyObject *Cursor_fetchone(Cursor *self)
     return NULL;
 
   Py_BEGIN_ALLOW_THREADS;
-  EXEC SQL FETCH :cursorName USING DESCRIPTOR tdaOut;
+  if (self->is_scroll) {
+    exec sql begin declare section;
+    int scroll_val;
+    exec sql end declare section;
+    scroll_val = self->scroll_value;
+    switch (self->pending_scroll) {
+      case 0:
+        EXEC SQL FETCH NEXT :cursorName USING DESCRIPTOR tdaOut;
+        break;
+      case 1:
+        EXEC SQL FETCH ABSOLUTE :scroll_val :cursorName USING DESCRIPTOR tdaOut;
+        break;
+      case 2:
+        EXEC SQL FETCH RELATIVE :scroll_val :cursorName USING DESCRIPTOR tdaOut;
+        break;
+    }
+    self->pending_scroll = 0;
+    self->scroll_value = 0;
+  }
+  else {
+    EXEC SQL FETCH :cursorName USING DESCRIPTOR tdaOut;
+  }
   Py_END_ALLOW_THREADS;
   for (i=0; i<6; i++)
     self->sqlerrd[i] = sqlca.sqlerrd[i];
@@ -2273,6 +2317,68 @@ static PyObject *Cursor_fetchmany(Cursor *self, PyObject *args, PyObject *kwds)
 static PyObject *Cursor_fetchall(Cursor *self)
 {
   return fetchCounted(self, INT_MAX);
+}
+
+static PyObject* Cursor_scroll(Cursor *self, PyObject *args, PyObject *kwds)
+{
+  int value;
+  char *mode_str = NULL;
+  int mode = 0;
+  static char* kwdnames[] = { "value", "mode", NULL };
+
+  require_cursor_open(self);
+  if (!self->is_scroll) {
+    /* force error -482, Invalid operation on a non-SCROLL cursor. */
+    struct sqlda *tdaOut = self->daOut;
+    EXEC SQL BEGIN DECLARE SECTION;
+    char *cursorName;
+    EXEC SQL END DECLARE SECTION;
+    cursorName = self->cursorName;
+    EXEC SQL FETCH CURRENT :cursorName USING DESCRIPTOR tdaOut;
+    error_handle(self->conn, self,
+                 ExcNotSupportedError, dberror_value("scroll"));
+    return NULL;
+  }
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "i|s", kwdnames,
+      &value, &mode_str))
+      return NULL;
+
+  if (mode_str==NULL || *mode_str==0) {
+    mode = 2;
+  } else if (!strncmp(mode_str, "relative", strlen(mode_str))) {
+    mode = 2;
+  } else if (!strncmp(mode_str, "absolute", strlen(mode_str))) {
+    mode = 1;
+  } else {
+    PyErr_Format(ExcInterfaceError,"Unrecognized scroll mode '%s'.", mode_str);
+    return NULL;
+  } 
+  /* Actual scrolling on the database side is tied to fetching. We could do
+     a dummy fetch now and then "fetch current" when the user actually fetches,
+     but that would waste time on unnecessary fetches. Instead, we'll just
+     make a note of a pending scroll until the actual fetch. Since the user
+     may call scroll() in sequence without fetching in between, this scroll
+     may modify an existing pending scroll. */
+  if (self->pending_scroll==0) {
+    /* No previous scroll pending, straightforward. */
+    self->pending_scroll = mode;
+    self->scroll_value = value;
+  }
+  else {
+    /* Modify pending scroll */
+    if (mode==1) {
+      /* a new absolute scroll overwrites the pending scroll */
+      self->pending_scroll = mode;
+      self->scroll_value = value;
+    }
+    else {
+      /* a new relative scroll gets added to pending scroll, regardless of
+         whether the pending scoll is absolute or relative */
+      self->scroll_value += value;
+    }
+  }
+  Py_INCREF(Py_None);
+  return Py_None;
 }
 
 static PyObject *Cursor_setinputsizes(Cursor *self,

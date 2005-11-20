@@ -230,6 +230,58 @@ typedef struct Sblob_t
   mint lofd; 
 } Sblob;
 
+PyDoc_STRVAR(Sblob_doc, "\
+Smart Large Object for input and output binding of BLOB and CLOB\n\
+columns.\n\n\
+To create an Sblob object, call Connection.Sblob().");
+
+PyDoc_STRVAR(Sblob_close_doc, "\
+close()\n\n\
+Close the Sblob.");
+
+PyDoc_STRVAR(Sblob_open_doc, "\
+open([flags])\n\n\
+Open the Sblob using the given access flags.");
+
+PyDoc_STRVAR(Sblob_read_doc, "\
+read(nbytes) -> string\n\n\
+Read up to nbytes bytes from the current file position and returns\n\
+the contents in a string.");
+
+PyDoc_STRVAR(Sblob_write_doc, "\
+write(buf) -> int\n\n\
+Writes the contents of buf at the current file position and returns\n\
+the number of bytes written.");
+
+PyDoc_STRVAR(Sblob_seek_doc, "\
+seek(offset, whence) -> long\n\n\
+Sets the file position to the specified 'offset' relative to\n\
+'whence'.\n\n\
+'whence' can be LO_SEEK_SET, LO_SEEK_CUR, or LO_SEEK_END, indicating\n\
+that the offset is relative to the beginning, the current file\n\
+position, or the end of the smart large object, respectively.\n\
+\n\
+The return value is the resulting file position.");
+
+PyDoc_STRVAR(Sblob_tell_doc, "\
+tell() -> long\n\n\
+Returns the current file position.");
+
+PyDoc_STRVAR(Sblob_stat_doc, "\
+stat() -> dict\n\n\
+Returns file status information in a dictionary with the following\n\
+keys:\n\n\
+size = content size in bytes\n\
+atime = last access time\n\
+ctime = last change-in-status time\n\
+mtime = last modification time\n\
+refcnt = reference count");
+
+PyDoc_STRVAR(Sblob_truncate_doc, "\
+truncate(offset)\n\n\
+Truncates or expands the smart large object such that the given\n\
+offset is at the end of the smart large object.");
+
 static int Sblob_init(Sblob *self, PyObject *args, PyObject *kwargs);
 static void Sblob_dealloc(Sblob *self);
 static PyObject *Sblob_close(Sblob *self);
@@ -244,14 +296,22 @@ static PyObject *Sblob_specget(Sblob *self, void *closure);
 static int Sblob_alter(Sblob *self, PyObject *value, void *closure);
 
 static PyMethodDef Sblob_methods[] = {
-  { "close", (PyCFunction)Sblob_close, METH_NOARGS },
-  { "open", (PyCFunction)Sblob_open, METH_VARARGS|METH_KEYWORDS },
-  { "read", (PyCFunction)Sblob_read, METH_VARARGS|METH_KEYWORDS },
-  { "write", (PyCFunction)Sblob_write, METH_VARARGS|METH_KEYWORDS },
-  { "seek", (PyCFunction)Sblob_seek, METH_VARARGS|METH_KEYWORDS },
-  { "tell", (PyCFunction)Sblob_tell, METH_NOARGS },
-  { "stat", (PyCFunction)Sblob_stat, METH_NOARGS },
-  { "truncate", (PyCFunction)Sblob_truncate, METH_VARARGS|METH_KEYWORDS },
+  { "close", (PyCFunction)Sblob_close, METH_NOARGS,
+    Sblob_close_doc },
+  { "open", (PyCFunction)Sblob_open, METH_VARARGS|METH_KEYWORDS,
+    Sblob_open_doc },
+  { "read", (PyCFunction)Sblob_read, METH_VARARGS|METH_KEYWORDS,
+    Sblob_read_doc },
+  { "write", (PyCFunction)Sblob_write, METH_VARARGS|METH_KEYWORDS,
+    Sblob_write_doc },
+  { "seek", (PyCFunction)Sblob_seek, METH_VARARGS|METH_KEYWORDS,
+    Sblob_seek_doc },
+  { "tell", (PyCFunction)Sblob_tell, METH_NOARGS,
+    Sblob_tell_doc },
+  { "stat", (PyCFunction)Sblob_stat, METH_NOARGS,
+    Sblob_stat_doc },
+  { "truncate", (PyCFunction)Sblob_truncate, METH_VARARGS|METH_KEYWORDS,
+    Sblob_truncate_doc },
   { NULL }
 };
 
@@ -268,16 +328,21 @@ enum SBLOB_CSPECS {
 } ;
 
 static PyGetSetDef Sblob_properties[] = {
-  { "estbytes", (getter)Sblob_specget, (setter)NULL, "",
-                (void*)SBLOB_CSPEC_ESTBYTES },
-  { "extsz",    (getter)Sblob_specget, (setter)Sblob_alter, "",
-                (void*)SBLOB_CSPEC_EXTSZ },
-  { "flags",    (getter)Sblob_specget, (setter)Sblob_alter, "",
-                (void*)SBLOB_CSPEC_FLAGS },
-  { "maxbytes", (getter)Sblob_specget, (setter)NULL, "",
-                (void*)SBLOB_CSPEC_MAXBYTES },
-  { "sbspace",  (getter)Sblob_specget, (setter)NULL, "",
-                (void*)SBLOB_CSPEC_SBSPACE },
+  { "estbytes", (getter)Sblob_specget, (setter)NULL,
+    "Gets the Sblob's estimated size.",
+    (void*)SBLOB_CSPEC_ESTBYTES },
+  { "extsz",    (getter)Sblob_specget, (setter)Sblob_alter,
+    "Gets or sets the Sblob's extent size.",
+    (void*)SBLOB_CSPEC_EXTSZ },
+  { "flags",    (getter)Sblob_specget, (setter)Sblob_alter,
+    "Gets or sets the Sblob's storage characteristics flags.",
+    (void*)SBLOB_CSPEC_FLAGS },
+  { "maxbytes", (getter)Sblob_specget, (setter)NULL,
+    "Gets the Sblob's maximum size.",
+    (void*)SBLOB_CSPEC_MAXBYTES },
+  { "sbspace",  (getter)Sblob_specget, (setter)NULL,
+    "Gets the Sblob's smart blob space name.",
+    (void*)SBLOB_CSPEC_SBSPACE },
   { NULL }
 };
 
@@ -303,7 +368,7 @@ static PyTypeObject Sblob_type = {
   0,                                  /* tp_setattro */
   0,                                  /* tp_as_buffer */
   Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-  "",                                 /* tp_doc */
+  Sblob_doc,                          /* tp_doc */
   0,                                  /* tp_traverse */
   0,                                  /* tp_clear */
   0,                                  /* tp_richcompare */
@@ -446,6 +511,17 @@ empty list if there are no more rows available.\n\
 \n\
 See also: fetchone()");
 
+PyDoc_STRVAR(Cursor_scroll_doc, "\
+scroll(value[,mode='relative'])\n\n\
+Scroll the cursor in the result set to a new position according to\n\
+the scroll mode.\n\n\
+scroll() raises a NotSupportedError if the cursor was not created\n\
+as a scroll cursor.\n\
+\n\
+If mode is 'relative', the value is taken as an offset to\n\
+the current position in the result set. If mode is 'absolute',\n\
+the value is taken as an absolute target position.");
+
 PyDoc_STRVAR(Cursor_setinputsizes_doc,
 "setinputsizes(sizes)\n\n\
 informixdb does not implement this optimization.");
@@ -479,7 +555,8 @@ static PyMethodDef Cursor_methods[] = {
     Cursor_fetchmany_doc },
   { "fetchall", (PyCFunction)Cursor_fetchall, METH_NOARGS,
     Cursor_fetchall_doc },
-  { "scroll", (PyCFunction)Cursor_scroll, METH_VARARGS|METH_KEYWORDS },
+  { "scroll", (PyCFunction)Cursor_scroll, METH_VARARGS|METH_KEYWORDS,
+    Cursor_scroll_doc },
   { "setinputsizes", (PyCFunction)Cursor_setinputsizes, METH_VARARGS|METH_KEYWORDS,
     Cursor_setinputsizes_doc },
   { "setoutputsize", (PyCFunction)Cursor_setoutputsize, METH_VARARGS|METH_KEYWORDS,
@@ -605,7 +682,8 @@ static PyObject *Connection_Sblob(Connection *self, PyObject *args, PyObject *kw
 #endif
 
 PyDoc_STRVAR(Connection_cursor_doc,
-"cursor([name=None,rowformat=_informixdb.ROW_AS_TUPLE]) -> Cursor\n\n\
+"cursor([name=None,rowformat=ROW_AS_TUPLE,scroll=False,hold=False])\n\
+   -> Cursor\n\n\
 Return a new Cursor object using the connection.\n\
 \n\
 'name' allows you to optionally name your cursor. This is useful\n\
@@ -613,7 +691,12 @@ for creating an update or delete cursor that can be used by a second\n\
 cursor in an UPDATE (or DELETE) WHERE CURRENT OF ... statement.\n\
 \n\
 'rowformat' allows you to optionally specify whether the cursor\n\
-should return fetched result rows as tuples or as dictionaries.");
+should return fetched result rows as tuples, as dictionaries,\n\
+or as Row objects.\n\
+\n\
+When 'scroll' is True, the cursor will be a scroll cursor.\n\
+\n\
+When 'hold' is True, the cursor will be a cursor with hold.");
 
 PyDoc_STRVAR(Connection_commit_doc,
 "commit()\n\n\
@@ -640,6 +723,32 @@ For databases that have transactions enabled an implicit rollback\n\
 is performed when the connection is closed, so be sure to\n\
 commit any outstanding operations before closing a Connection.");
 
+#ifdef HAVE_SBLOB
+PyDoc_STRVAR(Connection_Sblob_doc, "\
+Sblob(...) -> Sblob object\n\n\
+Create and open a Smart Large Object suitable for inserting or\n\
+updating into a BLOB or CLOB column.\n\n\
+This method has the following optional parameters:\n\n\
+  type\n\
+      SBLOB_TYPE_BLOB or SBLOB_TYPE_CLOB.\n\
+      Default is SBLOB_TYPE_BLOB\n\
+  create_flags\n\
+      creation time storage characteristics (LO_ATTR_*) flags\n\
+  open_flags\n\
+      opening flags (LO_OPEN_*) for the Smart Large Object.\n\
+      Default is LO_OPEN_RDWR\n\
+  col_info\n\
+      name of a database column in the format\n\
+      database@server:table.column whose storage\n\
+      characteristics will be used as defaults for this Sblob\n\
+  sbspace, extsz, estbytes, maxbytes\n\
+      storage characteristics settings\n\
+Any combination of explicit storage characteristics may be present.\n\
+Explicit storage characteristics that are given will be combined\n\
+with database defined or col_info derived default values for storage\n\
+characteristics that are not given.");
+#endif
+
 static PyMethodDef Connection_methods[] = {
   { "cursor", (PyCFunction)Connection_cursor, METH_VARARGS|METH_KEYWORDS,
     Connection_cursor_doc },
@@ -651,7 +760,7 @@ static PyMethodDef Connection_methods[] = {
     Connection_close_doc },
 #ifdef HAVE_SBLOB
   { "Sblob", (PyCFunction)Connection_Sblob, METH_VARARGS|METH_KEYWORDS,
-    "" },
+    Connection_Sblob_doc },
 #endif
   { NULL }
 };

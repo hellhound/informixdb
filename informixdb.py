@@ -47,25 +47,32 @@ http://www.python.org/peps/pep-0249.html
 """
 
 class Row(object):
+  """Helper class for cursors whose row format is ROW_AS_OBJECT."""
   def __init__(self, d): self.__dict__.update(d)
   def __repr__(self): return repr(self.__dict__)
   def __str__(self): return str(self.__dict__)
 
 class IntervalYearToMonth(object):
+  """\
+This class is used for input and output binding of
+INTERVAL columns whose precision is a subset of
+YEAR TO MONTH.
+
+Intervals can be added to dates, datetimes, and other Intervals
+that have compatible precision. Intervals can also be multiplied
+and divided by scalar factors.
+"""
   def __init__(self, years=0, months=0):
     self._months = 12*years+months
     self.years, self.months = divmod(self._months,12)
   def __repr__(self):
     return "%s(%d, %d)"%(self.__class__.__name__,self.years,self.months)
-  # str() returns the Interval in Informix's format
   def __str__(self):
+    """Returns the interval in Informix's format for input binding."""
     if self._months < 0:
       return "-%d-%02d" % divmod(-self._months,12)
     else:
       return "%d-%02d" % divmod(self._months,12)
-  # arithmetic operations: analogous to timedelta. Supports adding to
-  # and subtracting from dates, datetimes, and other IntervalYearToMonths,
-  # as well as multiplying with and dividing by scalar factors.
   def __add__(self, other):
       if isinstance(other, IntervalYearToMonth):
         return self.__class__(0, int(self._months+other._months))
@@ -99,8 +106,8 @@ class IntervalYearToMonth(object):
   __radd__ = __add__
   __rmul__ = __mul__
   __floordiv__ = __div__
-  # implement comparison to other IntervalYearToMonths
   def __cmp__(self, other):
+      """Implements comparisons between intervals."""
       if isinstance(other, IntervalYearToMonth):
         return self._months - other._months
       else: return NotImplemented
@@ -109,10 +116,19 @@ class IntervalYearToMonth(object):
 # by datetime.timedelta, from which this class is derived.
 import datetime
 class IntervalDayToFraction(datetime.timedelta):
+  """\
+This class is used for input and output binding of
+INTERVAL columns whose precision is a subset of
+DAY TO FRACTION.
+
+Intervals can be added to dates, datetimes, and other Intervals
+that have compatible precision. Intervals can also be multiplied
+and divided by scalar factors.
+"""
   def __init__(self,days=0,seconds=0,microseconds=0):
     datetime.timedelta.__init__(self, days, seconds, microseconds)
-  # str() returns the Interval in Informix's format
   def __str__(self):
+    """Returns the interval in Informix's format for input binding."""
     if self.days<0:
       neg = IntervalDayToFraction(-self.days, -self.seconds, -self.microseconds)
       return '-'+str(neg)
@@ -132,10 +148,12 @@ from _informixdb import *
 # to instantiate these classes directly.
 from _informixdb import Cursor as _Cursor, Connection as _Connection
 class Cursor(_Cursor):
+  __doc__ = _Cursor.__doc__
   def __new__(self, *args, **kwargs):
     raise InterfaceError, "Use Connection.cursor() to instantiate a cursor."
 del _Cursor
 class Connection(_Connection):
+  __doc__ = _Connection.__doc__
   def __new__(self, *args, **kwargs):
     raise InterfaceError, "Use connect() to instantiate a connection."
 del _Connection
@@ -143,6 +161,7 @@ try:
   # Same for Sblobs if we have support for them in _informixdb
   from _informixdb import Sblob as _Sblob
   class Sblob(_Sblob):
+    __doc__ = _Sblob.__doc__
     def __new__(self, *args, **kwargs):
       raise InterfaceError, "Use Connection.Sblob() to instantiate an Sblob."
   del _Sblob

@@ -1292,6 +1292,10 @@ static void bindOutput(Cursor *cur)
 
   Py_DECREF(cur->description);
   cur->description = PyTuple_New(cur->daOut->sqld);
+  /* Objects of simple types will be packed into one combined output buffer.
+     Complex objects will be allocated individually. In the first loop we
+     gather the required size of the output buffer for the simple types, and
+     we allocate the individual space for the complex types here. */
   for (pos = 0, var = cur->daOut->sqlvar;
        pos < cur->daOut->sqld;
        pos++, var++) {
@@ -1307,6 +1311,7 @@ static void bindOutput(Cursor *cur)
     var->sqlind = &cur->indOut[pos];
     cur->originalType[pos] = var->sqltype;
     cur->originalXid[pos] = var->sqlxid;
+    var->sqldata = NULL;
 
     switch(var->sqltype & SQLTYPE){
     case SQLBYTES:
@@ -1351,42 +1356,55 @@ static void bindOutput(Cursor *cur)
       break;
     default:
 #ifdef HAVE_SBLOB
-        if (ISSMARTBLOB(var->sqltype, var->sqlxid))
-          ; /* do nothing */
-        else
+        if (ISSMARTBLOB(var->sqltype, var->sqlxid)) {
+          /* Smart large object: allocate space for its LO handle */
+          var->sqldata = malloc(sizeof(ifx_lo_t));
+        } else
 #endif
 #ifdef HAVE_UDT
-        if (ISCOMPLEXTYPE(var->sqltype) || ISUDTTYPE(var->sqltype))
+        if (ISCOMPLEXTYPE(var->sqltype) || ISUDTTYPE(var->sqltype)) {
+          /* Other UDT: allocate an lvarchar pointer for the string
+             representation. Note that smart large objects are UDTs, too,
+             so the check for sblobs must come before this one, because
+             we're not interested in the string representation of an sblob. */
+          exec sql begin declare section;
+          lvarchar **currentlvarcharptr;
+          exec sql end declare section;
+
           var->sqltype = CLVCHARPTRTYPE;
-        else
+          currentlvarcharptr = malloc(sizeof(void *));
+          *currentlvarcharptr = 0;
+          ifx_var_flag(currentlvarcharptr,1);
+    
+          var->sqlxid = 1;
+          var->sqldata = *currentlvarcharptr;
+          var->sqllen  = sizeof(void *);
+        } else
 #endif
           var->sqltype = CCHARTYPE;
       break;
 
     }
-#ifdef HAVE_SBLOB
-    if (!ISSMARTBLOB(var->sqltype, var->sqlxid)) {
-#endif
-    var->sqllen = rtypmsize(var->sqltype, var->sqllen);
-    count = rtypalign(count, var->sqltype) + var->sqllen;
-#ifdef HAVE_SBLOB
+    if (!var->sqldata) {
+      var->sqllen = rtypmsize(var->sqltype, var->sqllen);
+      count = rtypalign(count, var->sqltype) + var->sqllen;
     }
-#endif
   }
 
+  /* now we know how big the buffer needs to be, allocate it. */
   bufp = cur->outputBuffer = malloc(count);
 
+  /* the second loop through is for handing out chunks of the output buffer
+     for the simple types. */ 
   for (pos = 0, var = cur->daOut->sqlvar;
        pos < cur->daOut->sqld;
        pos++, var++) {
+
+    /* skip fields that have already been allocated in the first loop */
+    if (var->sqldata) continue;
+
     bufp = (char *) rtypalign( (int) bufp, var->sqltype);
 
-#ifdef HAVE_SBLOB
-    if (ISSMARTBLOB(var->sqltype, var->sqlxid)) {
-      var->sqldata = malloc(sizeof(ifx_lo_t));
-    }
-    else
-#endif
     if (var->sqltype == CLOCATORTYPE) {
       loc_t *loc = (loc_t*) bufp;
       loc->loc_loctype = LOCMEMORY;
@@ -1394,26 +1412,8 @@ static void bindOutput(Cursor *cur)
       loc->loc_oflags = 0;
       loc->loc_mflags = 0;
     }
-#ifdef HAVE_UDT
-    else if (var->sqltype == CLVCHARPTRTYPE )
-    {
-      exec sql begin declare section;
-      lvarchar **currentlvarcharptr;
-      exec sql end declare section;
-
-      currentlvarcharptr = malloc(sizeof(void *));
-      *currentlvarcharptr = 0;
-      ifx_var_flag(currentlvarcharptr,1);
-
-      var->sqlxid = 1;
-      var->sqldata = *currentlvarcharptr;
-      var->sqllen  = sizeof(void *);
-    }
-#endif
-    else {
-      var->sqldata = bufp;
-      bufp += var->sqllen;
-    }
+    var->sqldata = bufp;
+    bufp += var->sqllen;
 
     if (var->sqltype == CDTIMETYPE || var->sqltype == CINVTYPE) {
       /* let the database set the correct datetime format */

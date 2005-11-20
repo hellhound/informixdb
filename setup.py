@@ -189,8 +189,8 @@ if sys.version < '2.2.3':
     DistributionMetadata.download_url = None
 
 setup (name = 'InformixDB',
-       version = '2.0',
-       description = 'InformixDB v2.0',
+       version = '2.1',
+       description = 'InformixDB v2.1',
        long_description = \
          "InformixDB is a DB-API 2.0 compliant interface for IBM Informix\n"
          "databases.",

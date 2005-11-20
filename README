@@ -1,7 +1,7 @@
 INTRODUCTION
 ============
 
-This is informixdb 2.0, an Informix implementation of the Python
+This is informixdb 2.1, an Informix implementation of the Python
 Database API.  This release implements version 2.0 of the DB-API:
 
   http://www.python.org/topics/database/DatabaseAPI-2.0.html
@@ -10,7 +10,8 @@ The module consists of two components:
 
 - `_informixdb', a Python C extension that interfaces with INFORMIX-ESQL/C
   and implements the DB-API.
-- `informixdb', a very thin Python wrapper around _informixdb
+- `informixdb', a Python module that wraps around _informixdb and implements
+  various helper classes.
 
 It is released under a BSD-like license.  See the COPYRIGHT file
 included with this distribution for more details.
@@ -74,6 +75,11 @@ compiler that produced the Python interpreter you're using.
 
 NEWS
 ====
+
+From 2.0 to 2.1:
+- INTERVAL support
+- Scroll cursor and cursor with hold
+- Support for Smart Large Objects and User Defined Types
 
 From 1.5 to 2.0:
 
@@ -240,6 +246,7 @@ Release  Date        By
 1.4      2005-04-11  Carsten Haese
 1.5      2005-09-18  Carsten Haese
 2.0      2005-10-22  Carsten Haese
+2.1      TBD         Carsten Haese
 
 --
 Carsten Haese <chaese@users.sourceforge.net>

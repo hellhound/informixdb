@@ -4,7 +4,7 @@
 
 :Authors: Daniel Smertnig
 :Version: informixdb 2.1
-:Date: 2005-11-17
+:Date: 2005-11-20
 :Homepage: `InformixDB on Sourceforge`_
 
 .. contents:: InformixDB
@@ -265,6 +265,25 @@ information about executed statements:
 
 `errorhandler`
     See `Advanced error handling`_ on how to use `errorhandler` and `messages`.
+
+Scroll Cursors and Cursors with Hold
+------------------------------------
+`(new in version 2.1)`
+
+InformixDB allows you to use scroll cursors and cursors with hold. To
+create a scroll cursor, pass the argument ``scroll=True`` to the
+`Connection.cursor()` call. To create a cursor with hold, pass the argument
+``hold=True``. Both arguments may be given together to create a scroll cursor
+with hold.
+
+If a cursor was created as a scroll cursor, you may use its `scroll()`
+method to navigate through the result set. `scroll()` takes up to two
+arguments, a mandatory `value` argument and an optional `mode` argument.
+If given, `mode` must be either ``'absolute'`` or ``'relative'``,
+and it defaults to ``'relative'`` if not given. In absolute mode, `value`
+is the result row number to which you want to scroll. In relative mode,
+`value` is the number of rows by which you want to scroll from the current
+row.
 
 Transactions
 ============

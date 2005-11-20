@@ -209,9 +209,7 @@ See also `old/README' for other NOTES.
 FUTURE
 ======
 
-- Implement useful optional DB-API extensions if there are any that Daniel
-  hasn't already implemented. ;)
-- Low priority unless people ask for it: support SLOBs and UDTs.
+- Nothing planned at the moment. Let me know if you think a feature is missing.
 
 MAINTAINER
 ==========

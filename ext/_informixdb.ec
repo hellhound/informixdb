@@ -3701,8 +3701,10 @@ void init_informixdb(void)
 
   PyDateTime_IMPORT;
 
+#ifndef _WIN32
   /* when using a connection mode with forking (i.e. Informix SE)
      child processes might stay around as <defunct> unless SIGCHLD
      is handled */
   sqlsignal(-1, (void*)NULL, 0); 
+#endif
 }

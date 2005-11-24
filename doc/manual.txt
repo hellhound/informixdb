@@ -97,7 +97,8 @@ would be interpreted as a sequence, which is usually not what is intended::
     >>> cursor.execute('SELECT * FROM names WHERE first=:1', ('dagobert',)
 
 InformixDB will catch most of these errors since it requires the number of
-arguments to match the number of parameters exactly.
+actual paramaters to match the number of parameters which are referenced by the
+SQL statement exactly.
 
 Calling stored procedures with arguments is supported in a similiar way,
 except that no placeholders have to be specified::
@@ -108,7 +109,7 @@ Getting results
 ---------------
 
 To retrieve the results of a previously executed SQL statement or stored
-procedure `Cursor` objects provide tho `fetchone`, `fetchmany` and
+procedure `Cursor` objects provide the `fetchone`, `fetchmany` and
 `fetchall` methods:
 
 - ``fetchone()``: Returns the next row of the result set or ``None`` if no

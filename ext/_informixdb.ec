@@ -1195,6 +1195,18 @@ static int ibindString(struct sqlvar_struct *var, PyObject *item)
     item = PyNumber_Int(item);
   }
 #endif
+#ifdef SQLBOOL
+  if ((var->sqltype&SQLTYPE)==SQLBOOL
+      || LIKEBOOLEANXTYPE(var->sqltype, var->sqlxid) ) {
+    var->sqltype = CBOOLTYPE;
+    var->sqldata = malloc(1);
+    var->sqllen = 1;
+    *var->sqlind = 0;
+    *var->sqldata = 0;
+    if (PyObject_IsTrue(item)==1) { *var->sqldata = 1; }
+    return 1;
+  }
+#endif
   sitem = PyObject_Str(item);
   val = PyString_AS_STRING((PyStringObject*)sitem);
   n = strlen(val);
@@ -1463,15 +1475,26 @@ static void bindOutput(Cursor *cur)
     case SQLINTERVAL:
       var->sqltype = CINVTYPE;
       break;
-    default:
+    default: {
+        int known_type = 0;
+#ifdef SQLBOOL
+        if (!known_type &&
+            ((var->sqltype&SQLTYPE)==SQLBOOL
+            || LIKEBOOLEANXTYPE(var->sqltype, var->sqlxid))) {
+          var->sqltype = CBOOLTYPE;
+          known_type = 1;
+        }
+#endif
 #ifdef HAVE_SBLOB
-        if (ISSMARTBLOB(var->sqltype, var->sqlxid)) {
+        if (!known_type && ISSMARTBLOB(var->sqltype, var->sqlxid)) {
           /* Smart large object: allocate space for its LO handle */
           var->sqldata = malloc(sizeof(ifx_lo_t));
-        } else
+          known_type = 1;
+        }
 #endif
 #ifdef HAVE_UDT
-        if (ISCOMPLEXTYPE(var->sqltype) || ISUDTTYPE(var->sqltype)) {
+        if (!known_type&&
+            (ISCOMPLEXTYPE(var->sqltype)||ISUDTTYPE(var->sqltype))) {
           /* Other UDT: allocate an lvarchar pointer for the string
              representation. Note that smart large objects are UDTs, too,
              so the check for sblobs must come before this one, because
@@ -1488,11 +1511,14 @@ static void bindOutput(Cursor *cur)
           var->sqlxid = 1;
           var->sqldata = *currentlvarcharptr;
           var->sqllen  = sizeof(void *);
-        } else
+          known_type = 1;
+        }
 #endif
+        /* fall back to character string */
+        if (!known_type)
           var->sqltype = CCHARTYPE;
-      break;
-
+        break;
+      }
     }
     if (!var->sqldata) {
       var->sqllen = rtypmsize(var->sqltype, var->sqllen);
@@ -1536,6 +1562,21 @@ static PyObject *Cursor_getsqlerrd(Cursor *self, void* closure)
   return Py_BuildValue("(iiiiii)",
     self->sqlerrd[0], self->sqlerrd[1], self->sqlerrd[2],
     self->sqlerrd[3], self->sqlerrd[4], self->sqlerrd[5]);
+}
+
+static void copyDescr(struct sqlda *tdaDest, struct sqlda *tdaSrc)
+{
+  int i;
+  struct sqlvar_struct *varDest, *varSrc;
+  varDest = tdaDest->sqlvar;
+  varSrc = tdaSrc->sqlvar;
+  for (i=0; i<tdaSrc->sqld; i++) {
+    varDest->sqltype = varSrc->sqltype;
+    varDest->sqllen = varSrc->sqllen;
+    varDest->sqlxid = varSrc->sqlxid;
+    varSrc++;
+    varDest++;
+  }
 }
 
 static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
@@ -1607,6 +1648,8 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
       self->pending_scroll = 0;
       self->scroll_value = 0;
     } else {
+      /* If available, copy information about input parameters into daIn */
+      copyDescr(tdaIn, tdaOut);
       free(self->daOut);
       self->daOut = NULL;
     }
@@ -1723,6 +1766,8 @@ static PyObject *Cursor_executemany(Cursor *self,
       ret_on_dberror_cursor(self, "FREE");
       self->state = 2;
     } else {
+      /* If available, copy information about input parameters into daIn */
+      copyDescr(tdaIn, tdaOut);
       free(self->daOut);
       self->daOut = NULL;
     }
@@ -1982,6 +2027,13 @@ static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
     return buffer;
   } /* case SQLTEXT */
   } /* switch */
+#ifdef SQLBOOL
+  if ((type&SQLTYPE)==SQLBOOL||LIKEBOOLEANXTYPE(type,xid) ) {
+    PyObject *result = (*(char*)data)?Py_True:Py_False;
+    Py_INCREF(result);
+    return result;
+  }
+#endif
 #ifdef HAVE_SBLOB
   if (ISSMARTBLOB(type,xid)) {
       Sblob *new_sblob;
@@ -1993,7 +2045,7 @@ static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
       else
         new_sblob->sblob_type = SBLOB_TYPE_BLOB;
       return (PyObject*)new_sblob;
-  } else
+  }
 #endif
 #ifdef HAVE_UDT
   if (ISCOMPLEXTYPE(type)||ISUDTTYPE(type)) {
@@ -2004,8 +2056,15 @@ static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
     return result;
   }
 #endif
-  Py_INCREF(Py_None);
-  return Py_None;
+  {
+    /* Unknown type. bindOutput falls back to binding to a character string.
+       If Informix actually managed to read this unknown type into that string,
+       we might as well return it instead of returning None. */
+    register size_t len = strlen((char*)data);
+    register size_t clipped_len = byleng(data, len);
+    ((char*)data)[clipped_len] = 0;
+    return Py_BuildValue("s", (char*)data);
+  }
 }
 
 static PyObject *processOutput(Cursor *cur)

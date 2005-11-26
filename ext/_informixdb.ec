@@ -1400,6 +1400,19 @@ static int bindInput(Cursor *cur, PyObject *vars)
   return 1;
 }
 
+static inline PyObject* gettypename(struct sqlvar_struct *var)
+{
+#ifdef HAVE_UDT
+  if (ISCOMPLEXTYPE(var->sqltype)||ISUDTTYPE(var->sqltype)) {
+    return PyString_FromFormat("%s '%s'", rtypname(var->sqltype),
+                                          var->sqltypename);
+  }
+  else return PyString_FromString(rtypname(var->sqltype));
+#else
+  return PyString_FromString(rtypname(var->sqltype));
+#endif
+}
+
 static void bindOutput(Cursor *cur)
 {
   char * bufp;
@@ -1422,7 +1435,7 @@ static void bindOutput(Cursor *cur)
        pos++, var++) {
     PyObject *new_tuple = Py_BuildValue("(sNiiOOi)",
                                         var->sqlname,
-                                        PyString_FromString(rtypname(var->sqltype)),
+                                        gettypename(var),
                                         var->sqllen,
                                         var->sqllen,
                                         Py_None, Py_None,

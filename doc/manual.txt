@@ -97,10 +97,10 @@ would be interpreted as a sequence, which is usually not what is intended::
     >>> cursor.execute('SELECT * FROM names WHERE first=:1', ('dagobert',)
 
 InformixDB will catch most of these errors since it requires the number of
-actual paramaters to match the number of parameters which are referenced by the
+actual parameters to match the number of parameters which are referenced by the
 SQL statement exactly.
 
-Calling stored procedures with arguments is supported in a similiar way,
+Calling stored procedures with arguments is supported in a similar way,
 except that no placeholders have to be specified::
 
     >>> cursor.callproc('lower', ('FOO',))
@@ -320,7 +320,7 @@ InformixDB:
     database independent large object values.
 
 ``DATE``
-    `datettime.date`; ``informixdb.Date(year,month,day)`` or
+    `datetime.date`; ``informixdb.Date(year,month,day)`` or
     ``informixdb.DateFromTicks(ticks)`` should be used to create database
     independent date values.
 
@@ -416,7 +416,7 @@ to report error conditions:
     `DatabaseError`
         Base and catch-all for errors reported by the database.
         `DatabaseError` or subclasses of it are raised whenever a database
-        oparations fails.  When it's possible to determine the class of an
+        operation fails.  When it's possible to determine the class of an
         error via ``SQLSTATE``, the more specific error types are raised.
 
         `DataError`

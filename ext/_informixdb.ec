@@ -667,11 +667,15 @@ typedef struct Connection_t
   int is_open;
   PyObject *messages;
   PyObject *errorhandler;
+  int autocommit;
 } Connection;
 
 static int setConnection(Connection*);
 
 static int Connection_init(Connection *self, PyObject *args, PyObject* kwds);
+static PyObject *Connection_getautocommit(Connection* self, void* closure);
+static int Connection_setautocommit(Connection *self, PyObject *value,
+                                    void *closure);
 static void Connection_dealloc(Connection *self);
 static PyObject *Connection_cursor(Connection *self, PyObject *args, PyObject *kwds);
 static PyObject *Connection_commit(Connection *self);
@@ -797,6 +801,12 @@ static PyObject *Connection_getexception(PyObject* self, PyObject* exc)
   return exc;
 }
 
+PyDoc_STRVAR(Connection_autocommit_doc, "\
+Controls whether operations are automatically committed.\n\n\
+If autocommit is true, the connection operates without transactions\n\
+and all operations are committed immediately. By default, autocommit\n\
+is false.");
+
 static PyGetSetDef Connection_getseters[] = {
   { "Warning", (getter)Connection_getexception, NULL,
     ExcWarning_doc, DEFERRED_ADDRESS(ExcWarning) },
@@ -818,6 +828,8 @@ static PyGetSetDef Connection_getseters[] = {
     ExcDataError_doc, DEFERRED_ADDRESS(ExcDataError) },
   { "NotSupportedError", (getter)Connection_getexception, NULL,
     ExcNotSupportedError_doc, DEFERRED_ADDRESS(ExcNotSupportedError) },
+  { "autocommit", (getter)Connection_getautocommit,
+    (setter)Connection_setautocommit, Connection_autocommit_doc, NULL },
   { NULL }
 };
 
@@ -950,7 +962,7 @@ static PyObject *Connection_close(Connection *self)
   clear_messages(self);
   require_open(self);
 
-  if (self->has_commit) {
+  if (self->has_commit && !self->autocommit) {
     if (setConnection(self)) return NULL;
     EXEC SQL ROLLBACK WORK;
     ret_on_dberror(self, NULL, "ROLLBACK");
@@ -990,7 +1002,7 @@ static PyObject *Connection_commit(Connection *self)
   clear_messages(self);
   require_open(self);
 
-  if (self->has_commit) {
+  if (self->has_commit && !self->autocommit) {
     if (setConnection(self)) return NULL;
     EXEC SQL COMMIT WORK;
     ret_on_dberror(self, NULL, "COMMIT");
@@ -1016,16 +1028,20 @@ static PyObject *Connection_rollback(Connection *self)
   if (setConnection(self)) return NULL;
 
   if (self->has_commit) {
-    EXEC SQL ROLLBACK WORK;
-    ret_on_dberror(self, NULL, "ROLLBACK");
+    if (!self->autocommit) {
+      EXEC SQL ROLLBACK WORK;
+      ret_on_dberror(self, NULL, "ROLLBACK");
+    }
   } else {
     error_handle(self, NULL,
                  ExcNotSupportedError, dberror_value("ROLLBACK"));
     return NULL;
   }
 
-  EXEC SQL BEGIN WORK;
-  ret_on_dberror(self, NULL, "BEGIN");
+  if (!self->autocommit) {
+    EXEC SQL BEGIN WORK;
+    ret_on_dberror(self, NULL, "BEGIN");
+  }
 
   Py_INCREF(Py_None);
   return Py_None;
@@ -1748,7 +1764,7 @@ static PyObject *Cursor_executemany(Cursor *self,
     doCloseCursor(self, 0);
     cleanInputBinding(self);
     useInsertCursor =
-      (self->conn->has_commit && self->stype==SQ_INSERT);
+     (self->conn->has_commit&&!self->conn->autocommit&&self->stype==SQ_INSERT);
   } else {
     doCloseCursor(self, 1);
     deleteInputBinding(self);
@@ -1786,7 +1802,7 @@ static PyObject *Cursor_executemany(Cursor *self,
     }
 
     useInsertCursor =
-      (self->conn->has_commit && self->stype==SQ_INSERT);
+     (self->conn->has_commit&&!self->conn->autocommit&&self->stype==SQ_INSERT);
 
     if (useInsertCursor) {
       EXEC SQL DECLARE :cursorName CURSOR FOR :queryName;
@@ -2645,11 +2661,12 @@ static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
   char *dbUser = NULL;
   char *dbPass = NULL;
   EXEC SQL END DECLARE SECTION;
+  int autocommit = 0;
 
-  static char* kwd_list[] = { "dsn", "user", "password", 0 };
+  static char* kwd_list[] = { "dsn", "user", "password", "autocommit", 0 };
 
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|ss", kwd_list,
-                                   &connectionString, &dbUser, &dbPass)) {
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|ssi", kwd_list,
+            &connectionString, &dbUser, &dbPass, &autocommit)) {
     return -1;
   }
 
@@ -2674,8 +2691,10 @@ static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
 
   self->is_open = 1;
   self->has_commit = (sqlca.sqlwarn.sqlwarn1 == 'W');
+  self->autocommit = 0;
+  if (autocommit) self->autocommit = 1;
 
-  if (self->has_commit) {
+  if (self->has_commit && !self->autocommit) {
     EXEC SQL BEGIN WORK;
     if (is_dberror(self, NULL, "BEGIN")) {
       return -1;
@@ -2684,6 +2703,38 @@ static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
 
   setConnectionName(self->name);
 
+  return 0;
+}
+
+static PyObject *Connection_getautocommit(Connection* self, void* closure)
+{
+  if (self->autocommit) {
+    Py_INCREF(Py_True);
+    return Py_True;
+  }
+  else {
+    Py_INCREF(Py_False);
+    return Py_False;
+  }
+}
+
+static int Connection_setautocommit(Connection *self, PyObject *value,
+                                    void *closure)
+{
+  int newautocommit = 0;
+  if (PyObject_IsTrue(value)==1) { newautocommit = 1; }
+  if (setConnection(self)) return 1;
+  if (self->autocommit != newautocommit && self->has_commit) {
+    if (newautocommit) {
+      EXEC SQL COMMIT WORK;
+      if (is_dberror(self, NULL, "COMMIT")) { return 1; }
+    }
+    else {
+      EXEC SQL BEGIN WORK;
+      if (is_dberror(self, NULL, "BEGIN")) { return 1; }
+    }
+  }
+  self->autocommit = newautocommit;
   return 0;
 }
 
@@ -3106,7 +3157,7 @@ static PyObject* db_connect(PyObject *self, PyObject *args, PyObject *kwds)
 }
 
 PyDoc_STRVAR(db_connect_doc,
-"connect(dsn[,user,password]) -> Connection\n\n\
+"connect(dsn[,user,password,autocommit]) -> Connection\n\n\
 Establish a connection to a database.\n\n\
 'dsn' identifies a database environment as accepted by the CONNECT\n\
 statement. It can be the name of a database ('stores7'), the name\n\

@@ -1887,14 +1887,6 @@ static PyObject *Cursor_executemany(Cursor *self,
   return Py_None;
 }
 
-static PyObject *CallObjectAndDiscardArgs(PyObject *t, PyObject *a)
-{
-  PyObject *result;
-  result = PyObject_CallObject(t, a);
-  Py_DECREF(a);
-  return result;
-} 
-  
 static PyObject *doCopy(/* const */ void *data,
                    int type, int4 xid, int4 sqllen, struct Cursor_t *cur)
 {
@@ -1981,8 +1973,8 @@ static PyObject *doCopy(/* const */ void *data,
         }
         pos--;
       }
-      return CallObjectAndDiscardArgs(IntervalY2MType,
-               Py_BuildValue("(ii)",sign*year,sign*month) );
+      return PyObject_CallFunction(IntervalY2MType,
+               "ii", sign*year, sign*month);
     }
     else {
       exec sql begin declare section;
@@ -2005,9 +1997,8 @@ static PyObject *doCopy(/* const */ void *data,
         }
         pos--;
       }
-      return CallObjectAndDiscardArgs(IntervalD2FType,
-               Py_BuildValue("(iii)", sign*day,
-                      sign*(3600*hour+60*minute+second), sign*usec) );
+      return PyObject_CallFunction(IntervalD2FType,
+               "iii", sign*day, sign*(3600*hour+60*minute+second), sign*usec);
     }
   }
   case SQLCHAR:
@@ -2041,8 +2032,8 @@ static PyObject *doCopy(/* const */ void *data,
     result = dectoasc((dec_t*)data, dbuf, 34, right);
     if (result==0) {
       dbuf[34] = 0;
-      retval = CallObjectAndDiscardArgs(DecimalType,
-         Py_BuildValue("(s#)",dbuf,byleng(dbuf,34)) );
+      retval = PyObject_CallFunction(DecimalType,
+         "s#",dbuf,byleng(dbuf,34));
     }
     if (!retval) {
       PyErr_SetString(ExcInterfaceError, "Decimal conversion failed.");
@@ -2095,8 +2086,8 @@ static PyObject *doCopy(/* const */ void *data,
 #ifdef HAVE_SBLOB
   if (ISSMARTBLOB(type,xid)) {
       Sblob *new_sblob;
-      new_sblob = (Sblob*)CallObjectAndDiscardArgs((PyObject*)&Sblob_type,
-               Py_BuildValue("(Oi)", cur->conn, 0) );
+      new_sblob = (Sblob*)PyObject_CallFunction((PyObject*)&Sblob_type,
+               "Oi", cur->conn, 0);
       memcpy(&new_sblob->lo, data, sizeof(ifx_lo_t));
       if (xid==XID_CLOB)
         new_sblob->sblob_type = SBLOB_TYPE_CLOB;
@@ -2161,7 +2152,7 @@ static PyObject *processOutput(Cursor *cur)
     }
   }
   if (cur->rowformat == CURSOR_ROWFORMAT_ROWOBJ) {
-    row = CallObjectAndDiscardArgs(DataRowType, Py_BuildValue("(N)", row) );
+    row = PyObject_CallFunction(DataRowType, "N", row);
   }
   return row;
 }

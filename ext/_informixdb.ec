@@ -2991,12 +2991,10 @@ static int error_handle(Connection *connection, Cursor *cursor,
   }
 
   if (handler) {
-    PyObject *args, *hret;
+    PyObject *hret;
 
-    args = Py_BuildValue("(OOON)", (PyObject*)connection,
+    hret = PyObject_CallFunction(handler, "OOON", (PyObject*)connection,
                          cursor ? (PyObject*)cursor : Py_None, type, value);
-    hret = PyObject_Call(handler, args, NULL);
-    Py_DECREF(args);
     if (hret) {
       Py_DECREF(hret);
       return 0;
@@ -3129,17 +3127,14 @@ static PyTypeObject DBAPIType_type = {
 static PyObject* dbtp_create(char* types[])
 {
   char** tp;
-  PyObject *dbtp, *l, *a, *s;
+  PyObject *l, *s;
   l = PyList_New(0);
   for (tp = types; *tp != NULL; ++tp) {
     s = PyString_FromString(*tp);
     PyList_Append(l, s);
     Py_DECREF(s);
   }
-  a = Py_BuildValue("(N)", l);
-  dbtp = PyObject_Call((PyObject*)&DBAPIType_type, a, NULL);
-  Py_DECREF(a);
-  return dbtp;
+  return PyObject_CallFunction((PyObject*)&DBAPIType_type, "N", l);
 }
 
 static PyObject* db_Date(PyObject *self, PyObject *args, PyObject *kwds)

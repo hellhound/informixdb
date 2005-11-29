@@ -117,6 +117,9 @@ static PyObject *ExcNotSupportedError;
 static PyObject *IntervalY2MType;
 static PyObject *IntervalD2FType;
 static PyObject *DataRowType;
+#if HAVE_DECIMAL == 1
+static PyObject *DecimalType;
+#endif
 
 PyDoc_STRVAR(ExcWarning_doc,
 "Exception class for SQL warnings.\n\n\
@@ -410,6 +413,7 @@ typedef struct Cursor_t
   struct sqlda *daOut;
   int *originalType;
   int4 *originalXid;
+  int4 *originalLen;
   char *outputBuffer;
   short *indIn;
   short *indOut;
@@ -424,6 +428,9 @@ typedef struct Cursor_t
   int is_scroll;
   int pending_scroll;
   int scroll_value;
+#if HAVE_DECIMAL == 1
+  int use_decimal;
+#endif
   PyObject *messages;
   PyObject *errorhandler;
 } Cursor;
@@ -1439,6 +1446,7 @@ static void bindOutput(Cursor *cur)
   cur->indOut = calloc(cur->daOut->sqld, sizeof(short));
   cur->originalType = calloc(cur->daOut->sqld, sizeof(int));
   cur->originalXid = calloc(cur->daOut->sqld, sizeof(int4));
+  cur->originalLen = calloc(cur->daOut->sqld, sizeof(int4));
 
   Py_DECREF(cur->description);
   cur->description = PyTuple_New(cur->daOut->sqld);
@@ -1461,6 +1469,7 @@ static void bindOutput(Cursor *cur)
     var->sqlind = &cur->indOut[pos];
     cur->originalType[pos] = var->sqltype;
     cur->originalXid[pos] = var->sqlxid;
+    cur->originalLen[pos] = var->sqllen;
     var->sqldata = NULL;
 
     switch(var->sqltype & SQLTYPE){
@@ -1886,8 +1895,8 @@ static PyObject *CallObjectAndDiscardArgs(PyObject *t, PyObject *a)
   return result;
 } 
   
-static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
-                                    struct Connection_t *conn)
+static PyObject *doCopy(/* const */ void *data,
+                   int type, int4 xid, int4 sqllen, struct Cursor_t *cur)
 {
   switch(type & SQLTYPE){
   case SQLDATE:
@@ -2021,6 +2030,26 @@ static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
     return PyFloat_FromDouble(*(float*)data);
   case SQLDECIMAL:
   case SQLMONEY:
+#if HAVE_DECIMAL == 1
+  if (cur->use_decimal) {
+    char dbuf[35];
+    mint result;
+    mint right;
+    PyObject *retval = NULL;
+    right = PRECDEC(sqllen);
+    if (right==255) right = -1;
+    result = dectoasc((dec_t*)data, dbuf, 34, right);
+    if (result==0) {
+      dbuf[34] = 0;
+      retval = CallObjectAndDiscardArgs(DecimalType,
+         Py_BuildValue("(s#)",dbuf,byleng(dbuf,34)) );
+    }
+    if (!retval) {
+      PyErr_SetString(ExcInterfaceError, "Decimal conversion failed.");
+    }
+    return retval;
+  } else
+#endif
   {
     double dval;
     dectodbl((dec_t*)data, &dval);
@@ -2067,7 +2096,7 @@ static PyObject *doCopy(/* const */ void *data, int type, int4 xid,
   if (ISSMARTBLOB(type,xid)) {
       Sblob *new_sblob;
       new_sblob = (Sblob*)CallObjectAndDiscardArgs((PyObject*)&Sblob_type,
-               Py_BuildValue("(Oi)", conn, 0) );
+               Py_BuildValue("(Oi)", cur->conn, 0) );
       memcpy(&new_sblob->lo, data, sizeof(ifx_lo_t));
       if (xid==XID_CLOB)
         new_sblob->sblob_type = SBLOB_TYPE_CLOB;
@@ -2118,8 +2147,10 @@ static PyObject *processOutput(Cursor *cur)
       Py_INCREF(v);
     } else {
       v = doCopy(var->sqldata, cur->originalType[pos], cur->originalXid[pos],
-                 cur->conn);
+                 cur->originalLen[pos], cur);
     }
+
+    if (PyErr_Occurred()) return NULL;
 
     if (cur->rowformat==CURSOR_ROWFORMAT_DICT ||
         cur->rowformat==CURSOR_ROWFORMAT_ROWOBJ) {
@@ -2255,6 +2286,10 @@ static void deleteOutputBinding(Cursor *cur)
     free(cur->originalXid);
     cur->originalXid = 0;
   }
+  if (cur->originalLen) {
+    free(cur->originalLen);
+    cur->originalLen = 0;
+  }
   if (cur->outputBuffer) {
     free(cur->outputBuffer);
     cur->outputBuffer = 0;
@@ -2345,12 +2380,22 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   int rowformat = CURSOR_ROWFORMAT_TUPLE;
   int is_scroll = 0;
   int is_hold = 0;
+#if HAVE_DECIMAL == 1
+  int use_decimal = 1;
+  static char* kwdlist[] = { "connection", "name", "rowformat",
+                             "scroll", "hold", "use_decimal", 0 };
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|siiii", kwdlist,
+        &Connection_type, &conn, &name, &rowformat, &is_scroll, &is_hold,
+        &use_decimal))
+    return -1;
+  self->use_decimal = (use_decimal)?1:0;
+#else
   static char* kwdlist[] = { "connection", "name", "rowformat",
                              "scroll", "hold", 0 };
-
   if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|siii", kwdlist,
         &Connection_type, &conn, &name, &rowformat, &is_scroll, &is_hold))
     return -1;
+#endif
 
   Py_INCREF(Py_None);
   self->description = Py_None;
@@ -2361,6 +2406,7 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   self->daOut = 0;
   self->originalType = 0;
   self->originalXid = 0;
+  self->originalLen = 0;
   self->outputBuffer = 0;
   self->indIn = 0;
   self->indOut = 0;
@@ -3702,8 +3748,8 @@ void init_informixdb(void)
   static char* dbtp_rowid[] = { "serial", "serial8", NULL };
 
   PyObject *m = Py_InitModule3("_informixdb", globalMethods, _informixdb_doc);
-  PyObject *informixdbmodule;
-  PyObject *informixdbmdict;
+  PyObject *module;
+  PyObject *mdict;
 
 #define defException(name, base) \
           do { \
@@ -3811,18 +3857,34 @@ void init_informixdb(void)
   PyModule_AddObject(m, "Cursor", (PyObject*)&Cursor_type);
 
   /* obtain the type objects for the Interval classes */
-  informixdbmodule = PyImport_ImportModule("informixdb");
-  informixdbmdict = PyModule_GetDict(informixdbmodule);
+  module = PyImport_ImportModule("informixdb");
+  mdict = PyModule_GetDict(module);
   IntervalY2MType = PyDict_GetItemString(
-                      informixdbmdict, "IntervalYearToMonth");
+                      mdict, "IntervalYearToMonth");
   IntervalD2FType = PyDict_GetItemString(
-                      informixdbmdict, "IntervalDayToFraction");
-  DataRowType = PyDict_GetItemString(informixdbmdict, "Row");
+                      mdict, "IntervalDayToFraction");
+  DataRowType = PyDict_GetItemString(mdict, "Row");
   Py_INCREF(IntervalY2MType);
   Py_INCREF(IntervalD2FType);
   Py_INCREF(DataRowType);
 
   PyDateTime_IMPORT;
+
+#if HAVE_DECIMAL
+  DecimalType = NULL;
+  module = PyImport_ImportModule("decimal");
+  if (module) {
+    mdict = PyModule_GetDict(module);
+    if (mdict) {
+      DecimalType = PyDict_GetItemString(mdict, "Decimal");
+    }
+  }
+  if (!DecimalType) {
+    DecimalType = Py_None;
+    PyErr_SetString(PyExc_ImportError, "can't find decimal.Decimal");
+  }
+  Py_INCREF(DecimalType);
+#endif
 
 #ifndef _WIN32
   /* when using a connection mode with forking (i.e. Informix SE)

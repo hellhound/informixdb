@@ -156,9 +156,17 @@ def have_py_bool():
     else:
         return 0
 
+def have_decimal():
+    try:
+        import decimal
+        return 1
+    except:
+        return 0
+
 extra_macros = [('PYTHON_INCLUDE', get_python_inc(plat_specific=1)),
                 ('HAVE_C_DATETIME', have_c_datetime()),
-                ('HAVE_PY_BOOL', have_py_bool()) ]
+                ('HAVE_PY_BOOL', have_py_bool()),
+                ('HAVE_DECIMAL', have_decimal()) ]
 
 modules = [ 'informixdb' ]
 

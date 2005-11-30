@@ -51,6 +51,13 @@
 #include <locator.h>
 #include <datetime.h>
 
+#ifndef mint
+typedef int mint;
+#endif
+#ifndef int4
+typedef int int4;
+#endif
+
 /* Use LO_RDWR to determine if the CSDK supports Smart Blobs */
 #ifdef LO_RDWR
 #define HAVE_SBLOB
@@ -64,6 +71,12 @@
 #define HAVE_UDT
 #else
 #undef HAVE_UDT
+#endif
+
+#if defined(HAVE_UDT) || defined(HAVE_SLOB)
+#define HAVE_XSQLVAR /* extendend sqlvarstruct with xid */
+#else
+#undef HAVE_XSQLVAR
 #endif
 
 #if HAVE_C_DATETIME == 1
@@ -1233,6 +1246,7 @@ static int ibindString(struct sqlvar_struct *var, PyObject *item)
   sitem = PyObject_Str(item);
   val = PyString_AS_STRING((PyStringObject*)sitem);
   n = strlen(val);
+EXEC SQL ifdef SQLLVARCHAR;
 #ifdef HAVE_UDT
   if (n >= 32768) {
     /* use lvarchar* instead */
@@ -1254,6 +1268,7 @@ static int ibindString(struct sqlvar_struct *var, PyObject *item)
   }
   else
 #endif
+EXEC SQL endif;
   {
     var->sqltype = CSTRINGTYPE;
     var->sqldata = malloc(n+1);
@@ -1468,7 +1483,11 @@ static void bindOutput(Cursor *cur)
 
     var->sqlind = &cur->indOut[pos];
     cur->originalType[pos] = var->sqltype;
+#ifdef HAVE_XSQLVAR
     cur->originalXid[pos] = var->sqlxid;
+#else
+    cur->originalXid[pos] = 0;
+#endif
     cur->originalLen[pos] = var->sqllen;
     var->sqldata = NULL;
 
@@ -1530,7 +1549,8 @@ static void bindOutput(Cursor *cur)
           known_type = 1;
         }
 #endif
-#ifdef HAVE_UDT
+EXEC SQL ifdef SQLLVARCHAR;
+#if defined(HAVE_UDT)
         if (!known_type&&
             (ISCOMPLEXTYPE(var->sqltype)||ISUDTTYPE(var->sqltype))) {
           /* Other UDT: allocate an lvarchar pointer for the string
@@ -1552,6 +1572,7 @@ static void bindOutput(Cursor *cur)
           known_type = 1;
         }
 #endif
+EXEC SQL endif;
         /* fall back to character string */
         if (!known_type)
           var->sqltype = CCHARTYPE;
@@ -1611,7 +1632,9 @@ static void copyDescr(struct sqlda *tdaDest, struct sqlda *tdaSrc)
   for (i=0; i<tdaSrc->sqld; i++) {
     varDest->sqltype = varSrc->sqltype;
     varDest->sqllen = varSrc->sqllen;
+#ifdef XSQLVAR
     varDest->sqlxid = varSrc->sqlxid;
+#endif
     varSrc++;
     varDest++;
   }

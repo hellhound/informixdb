@@ -1,6 +1,7 @@
 import sys
 import os
 import shlex
+import re
 from distutils.core import setup, Extension
 from distutils.spawn import find_executable
 from distutils.sysconfig import get_python_inc
@@ -58,6 +59,27 @@ class build_ext(_build_ext):
 
         if self.esql_static:
             self.esql_parts.append('-static')
+
+        # determine esql version
+        esqlver = re.compile(r"(IBM)?.*ESQL Version (\d+)\.(\d+)")
+        cout = os.popen(' '.join(self.esql_parts[0:1] + [ '-V' ]),'r')
+        esqlversion = None
+        for line in cout:
+          matchobj = esqlver.match(line)
+          if matchobj:
+            matchgroups = matchobj.groups()
+            esqlversion = int(matchgroups[1] + matchgroups[2])
+            if matchgroups[0]=="IBM":
+              # IBM Informix CSDK 2.90 reports the ESQL version as 2.90
+              # even though it's ESQL 9.xx 
+              if esqlversion == 290: esqlversion = 960
+        if esqlversion==None:
+          esqlversion = 850
+        if esqlversion >= 900:
+          if get_platform()=="win32":
+            self.esql_parts.append("-edHAVE_ESQL9")
+          else:
+            self.esql_parts.append("-EDHAVE_ESQL9")
 
         # find esql libs/objects
         cout = os.popen(' '.join(self.esql_parts + [ '-libs' ]),'r')

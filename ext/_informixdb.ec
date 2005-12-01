@@ -51,33 +51,13 @@
 #include <locator.h>
 #include <datetime.h>
 
-#ifndef mint
-typedef int mint;
-#endif
-#ifndef int4
-typedef int int4;
-#endif
-
-/* Use LO_RDWR to determine if the CSDK supports Smart Blobs */
-#ifdef LO_RDWR
-#define HAVE_SBLOB
+$ifdef HAVE_ESQL9;
 #define SBLOB_TYPE_BLOB 0
 #define SBLOB_TYPE_CLOB 1
-#else
-#undef HAVE_SBLOB
-#endif
-
-#ifdef SQLUDTVAR
-#define HAVE_UDT
-#else
-#undef HAVE_UDT
-#endif
-
-#if defined(HAVE_UDT) || defined(HAVE_SLOB)
-#define HAVE_XSQLVAR /* extendend sqlvarstruct with xid */
-#else
-#undef HAVE_XSQLVAR
-#endif
+$else;
+typedef int mint;
+typedef long int4;
+$endif;
 
 #if HAVE_C_DATETIME == 1
   /* Python and Informix both have a datetime.h, the Informix header is
@@ -234,7 +214,7 @@ particular feature (e.g. VARCHARs or BYTE/TEXT types on Informix SE).");
             }\
           } while(0)
 
-#ifdef HAVE_SBLOB
+$ifdef HAVE_ESQL9;
 /************************* Smart Blobs *************************/
 typedef struct Sblob_t
 {
@@ -404,7 +384,7 @@ static PyTypeObject Sblob_type = {
   PyType_GenericNew,                  /* tp_new */
   _PyObject_Del                       /* tp_free */
 };
-#endif
+$endif;
 
 /************************* Cursors *************************/
 
@@ -701,9 +681,9 @@ static PyObject *Connection_cursor(Connection *self, PyObject *args, PyObject *k
 static PyObject *Connection_commit(Connection *self);
 static PyObject *Connection_rollback(Connection *self);
 static PyObject *Connection_close(Connection *self);
-#ifdef HAVE_SBLOB
+$ifdef HAVE_ESQL9;
 static PyObject *Connection_Sblob(Connection *self, PyObject *args, PyObject *kwds);
-#endif
+$endif;
 
 PyDoc_STRVAR(Connection_cursor_doc,
 "cursor([name=None,rowformat=ROW_AS_TUPLE,scroll=False,hold=False])\n\
@@ -747,7 +727,7 @@ For databases that have transactions enabled an implicit rollback\n\
 is performed when the connection is closed, so be sure to\n\
 commit any outstanding operations before closing a Connection.");
 
-#ifdef HAVE_SBLOB
+$ifdef HAVE_ESQL9;
 PyDoc_STRVAR(Connection_Sblob_doc, "\
 Sblob(...) -> Sblob object\n\n\
 Create and open a Smart Large Object suitable for inserting or\n\
@@ -771,7 +751,7 @@ Any combination of explicit storage characteristics may be present.\n\
 Explicit storage characteristics that are given will be combined\n\
 with database defined or col_info derived default values for storage\n\
 characteristics that are not given.");
-#endif
+$endif;
 
 static PyMethodDef Connection_methods[] = {
   { "cursor", (PyCFunction)Connection_cursor, METH_VARARGS|METH_KEYWORDS,
@@ -782,10 +762,10 @@ static PyMethodDef Connection_methods[] = {
     Connection_rollback_doc },
   { "close", (PyCFunction)Connection_close, METH_NOARGS,
     Connection_close_doc },
-#ifdef HAVE_SBLOB
+$ifdef HAVE_ESQL9;
   { "Sblob", (PyCFunction)Connection_Sblob, METH_VARARGS|METH_KEYWORDS,
     Connection_Sblob_doc },
-#endif
+$endif;
   { NULL }
 };
 
@@ -1231,7 +1211,7 @@ static int ibindString(struct sqlvar_struct *var, PyObject *item)
     item = PyNumber_Int(item);
   }
 #endif
-#ifdef SQLBOOL
+$ifdef HAVE_ESQL9;
   if ((var->sqltype&SQLTYPE)==SQLBOOL
       || LIKEBOOLEANXTYPE(var->sqltype, var->sqlxid) ) {
     var->sqltype = CBOOLTYPE;
@@ -1242,12 +1222,11 @@ static int ibindString(struct sqlvar_struct *var, PyObject *item)
     if (PyObject_IsTrue(item)==1) { *var->sqldata = 1; }
     return 1;
   }
-#endif
+$endif;
   sitem = PyObject_Str(item);
   val = PyString_AS_STRING((PyStringObject*)sitem);
   n = strlen(val);
-EXEC SQL ifdef SQLLVARCHAR;
-#ifdef HAVE_UDT
+$ifdef HAVE_ESQL9;
   if (n >= 32768) {
     /* use lvarchar* instead */
     EXEC SQL BEGIN DECLARE SECTION;
@@ -1267,8 +1246,7 @@ EXEC SQL ifdef SQLLVARCHAR;
     free( data );
   }
   else
-#endif
-EXEC SQL endif;
+$endif;
   {
     var->sqltype = CSTRINGTYPE;
     var->sqldata = malloc(n+1);
@@ -1305,7 +1283,7 @@ static int ibindInterval(struct sqlvar_struct *var, PyObject *item)
   return 1;
 }
 
-#ifdef HAVE_SBLOB
+$ifdef HAVE_ESQL9;
 static int ibindSblob(struct sqlvar_struct *var, PyObject *item)
 {
   Sblob *sblob = (Sblob*)item;
@@ -1321,7 +1299,7 @@ static int ibindSblob(struct sqlvar_struct *var, PyObject *item)
   *var->sqlind = 0;
   return 1;
 }
-#endif
+$endif;
 
 static int ibindNone(struct sqlvar_struct *var, PyObject *item)
 {
@@ -1336,11 +1314,11 @@ typedef int (*ibindFptr)(struct sqlvar_struct *, PyObject*);
 
 static ibindFptr ibindFcn(PyObject* item)
 {
-#ifdef HAVE_SBLOB
+$ifdef HAVE_ESQL9;
   if (PyObject_IsInstance(item, (PyObject*)&Sblob_type)) {
     return ibindSblob;
   } else
-#endif
+$endif;
   if (PyObject_IsInstance(item, IntervalY2MType) ||
       PyObject_IsInstance(item, IntervalD2FType)) {
     return ibindInterval;
@@ -1440,15 +1418,15 @@ static int bindInput(Cursor *cur, PyObject *vars)
 
 static inline PyObject* gettypename(struct sqlvar_struct *var)
 {
-#ifdef HAVE_UDT
+$ifdef HAVE_ESQL9;
   if (ISCOMPLEXTYPE(var->sqltype)||ISUDTTYPE(var->sqltype)) {
     return PyString_FromFormat("%s '%s'", rtypname(var->sqltype),
                                           var->sqltypename);
   }
   else return PyString_FromString(rtypname(var->sqltype));
-#else
+$else;
   return PyString_FromString(rtypname(var->sqltype));
-#endif
+$endif;
 }
 
 static void bindOutput(Cursor *cur)
@@ -1483,11 +1461,11 @@ static void bindOutput(Cursor *cur)
 
     var->sqlind = &cur->indOut[pos];
     cur->originalType[pos] = var->sqltype;
-#ifdef HAVE_XSQLVAR
+$ifdef HAVE_ESQL9;
     cur->originalXid[pos] = var->sqlxid;
-#else
+$else;
     cur->originalXid[pos] = 0;
-#endif
+$endif;
     cur->originalLen[pos] = var->sqllen;
     var->sqldata = NULL;
 
@@ -1519,13 +1497,13 @@ static void bindOutput(Cursor *cur)
     case SQLSERIAL:
       var->sqltype = CLONGTYPE;
       break;
-#ifdef SQLINT8
+$ifdef HAVE_ESQL9;
     case SQLINT8:
     case SQLSERIAL8:
       var->sqltype = CCHARTYPE;
       var->sqllen = 20;
       break;
-#endif
+$endif;
     case SQLDTIME:
       var->sqltype = CDTIMETYPE;
       break;
@@ -1534,23 +1512,18 @@ static void bindOutput(Cursor *cur)
       break;
     default: {
         int known_type = 0;
-#ifdef SQLBOOL
+$ifdef HAVE_ESQL9;
         if (!known_type &&
             ((var->sqltype&SQLTYPE)==SQLBOOL
             || LIKEBOOLEANXTYPE(var->sqltype, var->sqlxid))) {
           var->sqltype = CBOOLTYPE;
           known_type = 1;
         }
-#endif
-#ifdef HAVE_SBLOB
         if (!known_type && ISSMARTBLOB(var->sqltype, var->sqlxid)) {
           /* Smart large object: allocate space for its LO handle */
           var->sqldata = malloc(sizeof(ifx_lo_t));
           known_type = 1;
         }
-#endif
-EXEC SQL ifdef SQLLVARCHAR;
-#if defined(HAVE_UDT)
         if (!known_type&&
             (ISCOMPLEXTYPE(var->sqltype)||ISUDTTYPE(var->sqltype))) {
           /* Other UDT: allocate an lvarchar pointer for the string
@@ -1571,8 +1544,7 @@ EXEC SQL ifdef SQLLVARCHAR;
           var->sqllen  = sizeof(void *);
           known_type = 1;
         }
-#endif
-EXEC SQL endif;
+$endif;
         /* fall back to character string */
         if (!known_type)
           var->sqltype = CCHARTYPE;
@@ -1632,9 +1604,9 @@ static void copyDescr(struct sqlda *tdaDest, struct sqlda *tdaSrc)
   for (i=0; i<tdaSrc->sqld; i++) {
     varDest->sqltype = varSrc->sqltype;
     varDest->sqllen = varSrc->sqllen;
-#ifdef XSQLVAR
+$ifdef HAVE_ESQL9;
     varDest->sqlxid = varSrc->sqlxid;
-#endif
+$endif;
     varSrc++;
     varDest++;
   }
@@ -2028,9 +2000,9 @@ static PyObject *doCopy(/* const */ void *data,
   case SQLVCHAR:
   case SQLNCHAR:
   case SQLNVCHAR:
-#ifdef SQLLVARCHAR
+$ifdef HAVE_ESQL9;
   case SQLLVARCHAR:
-#endif
+$endif;
   {
       /* clip trailing spaces */
       register size_t len = strlen((char*)data);
@@ -2074,11 +2046,11 @@ static PyObject *doCopy(/* const */ void *data,
   case SQLINT:
   case SQLSERIAL:
     return PyInt_FromLong(*(long*)data);
-#ifdef SQLINT8
+$ifdef HAVE_ESQL9;
   case SQLINT8:
   case SQLSERIAL8:
     return PyLong_FromString((char *)data, NULL, 10);
-#endif
+$endif;
   case SQLBYTES:
   case SQLTEXT:
   {
@@ -2099,14 +2071,12 @@ static PyObject *doCopy(/* const */ void *data,
     return buffer;
   } /* case SQLTEXT */
   } /* switch */
-#ifdef SQLBOOL
+$ifdef HAVE_ESQL9;
   if ((type&SQLTYPE)==SQLBOOL||LIKEBOOLEANXTYPE(type,xid) ) {
     PyObject *result = (*(char*)data)?Py_True:Py_False;
     Py_INCREF(result);
     return result;
   }
-#endif
-#ifdef HAVE_SBLOB
   if (ISSMARTBLOB(type,xid)) {
       Sblob *new_sblob;
       new_sblob = (Sblob*)PyObject_CallFunction((PyObject*)&Sblob_type,
@@ -2118,8 +2088,6 @@ static PyObject *doCopy(/* const */ void *data,
         new_sblob->sblob_type = SBLOB_TYPE_BLOB;
       return (PyObject*)new_sblob;
   }
-#endif
-#ifdef HAVE_UDT
   if (ISCOMPLEXTYPE(type)||ISUDTTYPE(type)) {
     PyObject *result;
     char *lvcharbuf = ifx_var_getdata(&data);
@@ -2127,7 +2095,7 @@ static PyObject *doCopy(/* const */ void *data,
     ifx_var_dealloc(&data);
     return result;
   }
-#endif
+$endif;
   {
     /* Unknown type. bindOutput falls back to binding to a character string.
        If Informix actually managed to read this unknown type into that string,
@@ -2201,7 +2169,7 @@ static PyObject *Connection_cursor(Connection *self, PyObject *args, PyObject *k
   return cur;
 }
 
-#ifdef HAVE_SBLOB
+$ifdef HAVE_ESQL9;
 static PyObject *Connection_Sblob(Connection *self, PyObject *args, PyObject *kwds)
 {
   PyObject *a, *slob;
@@ -2223,7 +2191,7 @@ static PyObject *Connection_Sblob(Connection *self, PyObject *args, PyObject *kw
   Py_DECREF(a);
   return slob;
 }
-#endif
+$endif;
 
 static void cleanInputBinding(Cursor *cur)
 {
@@ -2239,11 +2207,11 @@ static void cleanInputBinding(Cursor *cur)
             free(loc->loc_buffer);
           }
         }
-#ifdef HAVE_UDT
+$ifdef HAVE_ESQL9;
         if (da->sqlvar[i].sqltype == SQLUDTVAR) {
           ifx_var_dealloc((void**)&(da->sqlvar[i].sqldata));
         }
-#endif
+$endif;
         free(da->sqlvar[i].sqldata);
       }
     }
@@ -2280,11 +2248,11 @@ static void deleteOutputBinding(Cursor *cur)
         if (loc->loc_buffer)
           free(loc->loc_buffer);
       }
-#ifdef HAVE_SBLOB
+$ifdef HAVE_ESQL9;
       if (ISSMARTBLOB(da->sqlvar[i].sqltype,da->sqlvar[i].sqlxid)) {
         free(da->sqlvar[i].sqldata);
       }
-#endif
+$endif;
     free(cur->daOut);
     cur->daOut = 0;
   }
@@ -3280,7 +3248,7 @@ static PyMethodDef globalMethods[] = {
   { NULL }
 };
 
-#ifdef HAVE_SBLOB
+$ifdef HAVE_ESQL9;
 static int makeint8(PyObject *in, ifx_int8_t *out)
 {
   PyObject *sitem;
@@ -3738,7 +3706,7 @@ static int Sblob_alter(Sblob *self, PyObject *value, void *closure)
   }
   return 0;
 }
-#endif
+$endif;
 
 PyDoc_STRVAR(_informixdb_doc,
 "DB-API 2.0 compliant interface for Informix databases.\n");
@@ -3802,11 +3770,11 @@ void init_informixdb(void)
   PyType_Ready(&Connection_type);
   PyType_Ready(&DBAPIType_type);
 
-#ifdef HAVE_SBLOB
+$ifdef HAVE_ESQL9;
   Sblob_type.ob_type = &PyType_Type;
   PyType_Ready(&Sblob_type);
   Py_INCREF(&Sblob_type);
-#endif
+$endif;
 
 #ifdef IFX_THREAD
   threadsafety = 1;
@@ -3827,7 +3795,7 @@ void init_informixdb(void)
   PyModule_AddIntConstant(m, "ROW_AS_DICT", CURSOR_ROWFORMAT_DICT);
   PyModule_AddIntConstant(m, "ROW_AS_OBJECT", CURSOR_ROWFORMAT_ROWOBJ);
 
-#ifdef HAVE_SBLOB
+$ifdef HAVE_ESQL9;
 #define ExposeIntConstant(x) PyModule_AddIntConstant(m, #x, x)
   ExposeIntConstant(SBLOB_TYPE_BLOB);
   ExposeIntConstant(SBLOB_TYPE_CLOB);
@@ -3858,7 +3826,7 @@ void init_informixdb(void)
   ExposeIntConstant(LO_SEEK_END);
   Py_INCREF(&Sblob_type);
   PyModule_AddObject(m, "Sblob", (PyObject*)&Sblob_type);
-#endif
+$endif;
 
   Py_INCREF(&Connection_type);
   PyModule_AddObject(m, "Connection", (PyObject*)&Connection_type);

@@ -1224,6 +1224,7 @@ $ifdef HAVE_ESQL9;
   }
 $endif;
   sitem = PyObject_Str(item);
+  if (PyErr_Occurred()) return 0;
   val = PyString_AS_STRING((PyStringObject*)sitem);
   n = strlen(val);
 $ifdef HAVE_ESQL9;
@@ -1265,6 +1266,7 @@ static int ibindInterval(struct sqlvar_struct *var, PyObject *item)
   intrvl_t *inv = (intrvl_t*)malloc(sizeof(intrvl_t));
   int ret;
 
+  if (PyErr_Occurred()) return 1;
   if (PyObject_IsInstance(item, IntervalY2MType))
      inv->in_qual = TU_IENCODE(9,TU_YEAR,TU_MONTH);
   else
@@ -3255,6 +3257,7 @@ static int makeint8(PyObject *in, ifx_int8_t *out)
   char *val;
   mint result;
   sitem = PyObject_Str(in);
+  if (PyErr_Occurred()) return -1;
   val = PyString_AS_STRING((PyStringObject*)sitem);
   result = ifx_int8cvasc(val, strlen(val), out);
   Py_DECREF(sitem);

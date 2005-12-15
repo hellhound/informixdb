@@ -1206,13 +1206,14 @@ static int ibindString(struct sqlvar_struct *var, PyObject *item)
   PyObject *sitem;
   const char *val;
   int n;
+  int sqltype = var->sqltype & SQLTYPE;
 #if HAVE_PY_BOOL == 1
   if (PyBool_Check(item)) {
     item = PyNumber_Int(item);
   }
 #endif
 $ifdef HAVE_ESQL9;
-  if ((var->sqltype&SQLTYPE)==SQLBOOL
+  if (sqltype==SQLBOOL
       || LIKEBOOLEANXTYPE(var->sqltype, var->sqlxid) ) {
     var->sqltype = CBOOLTYPE;
     var->sqldata = malloc(1);
@@ -1223,6 +1224,9 @@ $ifdef HAVE_ESQL9;
     return 1;
   }
 $endif;
+  if (sqltype==SQLTEXT||sqltype==SQLBYTES) {
+    return ibindBinary(var, item);
+  }
   sitem = PyObject_Str(item);
   if (PyErr_Occurred()) return 0;
   val = PyString_AS_STRING((PyStringObject*)sitem);
@@ -2706,6 +2710,10 @@ static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
   self->messages = PyList_New(0);
   self->errorhandler = Py_None;
   Py_INCREF(self->errorhandler);
+
+  /* this causes 'DESCRIBE' to describe inputs for update statements in
+     addition to insert statements. */
+  putenv("IFX_UPDDESC=1");
 
   Py_BEGIN_ALLOW_THREADS;
   if (dbUser && dbPass) {

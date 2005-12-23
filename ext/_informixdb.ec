@@ -1441,6 +1441,7 @@ static void bindOutput(Cursor *cur)
   int pos;
   int count = 0;
   struct sqlvar_struct *var;
+  int offset = 0;
 
   cur->indOut = calloc(cur->daOut->sqld, sizeof(short));
   cur->originalType = calloc(cur->daOut->sqld, sizeof(int));
@@ -1575,17 +1576,17 @@ $endif;
     /* skip fields that have already been allocated in the first loop */
     if (var->sqldata) continue;
 
-    bufp = (char *) rtypalign( (int) bufp, var->sqltype);
+    offset = rtypalign(offset, var->sqltype);
+    var->sqldata = bufp+offset;
+    offset += var->sqllen;
 
     if (var->sqltype == CLOCATORTYPE) {
-      loc_t *loc = (loc_t*) bufp;
+      loc_t *loc = (loc_t*) var->sqldata;
       loc->loc_loctype = LOCMEMORY;
       loc->loc_bufsize = -1;
       loc->loc_oflags = 0;
       loc->loc_mflags = 0;
     }
-    var->sqldata = bufp;
-    bufp += var->sqllen;
 
     if (var->sqltype == CDTIMETYPE || var->sqltype == CINVTYPE) {
       /* let the database set the correct datetime format */

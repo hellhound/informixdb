@@ -1735,8 +1735,6 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
 
     return Py_BuildValue("i", self->rowcount); /* number of row */
   }
-  /* error return */
-  return NULL;
 }
 
 static PyObject *Cursor_executemany(Cursor *self,
@@ -3879,6 +3877,6 @@ $endif;
   /* when using a connection mode with forking (i.e. Informix SE)
      child processes might stay around as <defunct> unless SIGCHLD
      is handled */
-  sqlsignal(-1, (void*)NULL, 0); 
+  sqlsignal(-1, (void(*)(void))NULL, 0);
 #endif
 }

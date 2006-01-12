@@ -1583,6 +1583,7 @@ $endif;
     if (var->sqltype == CLOCATORTYPE) {
       loc_t *loc = (loc_t*) var->sqldata;
       loc->loc_loctype = LOCMEMORY;
+      loc->loc_buffer = NULL;
       loc->loc_bufsize = -1;
       loc->loc_oflags = 0;
       loc->loc_mflags = 0;

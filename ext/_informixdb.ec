@@ -1903,7 +1903,9 @@ static PyObject *doCopy(/* const */ void *data,
     int i, pos;
     int year=1,month=1,day=1,hour=0,minute=0,second=0,usec=0;
     dtime_t* dt = (dtime_t*)data;
-    for (pos = 0, i = TU_START(dt->dt_qual); i <= TU_END(dt->dt_qual); ++i) {
+    for (pos = 0, i = TU_START(dt->dt_qual);
+         i <= TU_END(dt->dt_qual) && pos < dt->dt_dec.dec_ndgts;
+         ++i) {
       switch (i) {
       case TU_YEAR:
         year = dt->dt_dec.dec_dgts[pos++]*100;

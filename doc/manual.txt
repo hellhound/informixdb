@@ -3,8 +3,8 @@
 ==========================
 
 :Authors: Daniel Smertnig
-:Version: informixdb 2.1
-:Date: 2005-11-20
+:Version: informixdb 2.2
+:Date: 2006-03-26
 :Homepage: `InformixDB on Sourceforge`_
 
 .. contents:: InformixDB
@@ -48,6 +48,11 @@ If the `dsn` doesn't include a servername the value of the environment
 variable ``INFORMIXSERVER`` is used. When connecting without specifying the
 name of the database no database will be selected. This is useful for
 setting up a new database from within InformixDB.
+
+`New in version 2.2`: An optional `autocommit` parameter may be passed to
+turn on autocommit mode. In autocommit mode, the connection operates without
+transaction control and any changes are committed automatically. By default,
+autocommit is off.
 
 A `Connection` can be closed by calling its `close` method. From that point
 forward all operations on the `Connection` object or any of its associated
@@ -300,6 +305,10 @@ performed.
 When transactions are disabled in the database, `commit` becomes a no-op and
 `rollback` raises a `NotSupportedError` when called.
 
+`New in version 2.2`: A `Connection` object has an `autocommit` attribute
+that can be used to turn automatic commits on or off.
+
+
 Database values
 ===============
 
@@ -309,8 +318,14 @@ InformixDB:
 ``CHAR``, ``VARCHAR``, ``NCHAR``, ``NVARCHAR``, ``LVARCHAR``
     `string`
 
-``FLOAT``, ``SMALLFLOAT``, ``DECIMAL``, ``MONEY``
+``FLOAT``, ``SMALLFLOAT``
     `float`
+
+``DECIMAL``, ``MONEY``
+    `float` or `decimal.Decimal`;
+    In InformixDB-2.2 and Python 2.4, ``DECIMAL`` and ``MONEY`` values
+    will be returned as `decimal.Decimal` instances unless the cursor was
+    created with the ``use_decimal`` flag set to False.
 
 ``SMALLINT``, ``INT``, ``SERIAL``
     `int`
@@ -348,6 +363,9 @@ InformixDB:
     Sblob() method of the connection to which the Sblob should belong.
     Once an Sblob instance is either created or fetched, it provides a
     file-like interface for reading and writing its data.
+
+``BOOLEAN`` (IDS) (`new in version 2.2`)
+    `bool`
 
 extended types, user-defined types (IDS) (`new in version 2.1`)
     Complex and opaque types are mapped to their string representation.

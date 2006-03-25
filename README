@@ -76,6 +76,18 @@ compiler that produced the Python interpreter you're using.
 NEWS
 ====
 
+From 2.1 to 2.2:
+- Support for BOOLEAN columns
+- DECIMAL and MONEY columns can be fetched as decimal.Decimal instances
+  if the decimal module is available
+- autocommit mode for connections
+- Bug fixes:
+  * Output buffer allocation used pointer/int casts that don't work on
+    most 64 bit platforms.
+  * Selecting TEXT/BYTE column from an empty set of rows caused segmentation
+    fault under certain circumstances.
+  * datetime values with trailing double-zeroes were fetched incorrectly.
+
 From 2.0 to 2.1:
 - INTERVAL support
 - Scroll cursor and cursor with hold
@@ -245,6 +257,7 @@ Release  Date        By
 1.5      2005-09-18  Carsten Haese
 2.0      2005-10-22  Carsten Haese
 2.1      2005-11-21  Carsten Haese
+2.2      2006-03-26  Carsten Haese
 
 --
 Carsten Haese <chaese@users.sourceforge.net>

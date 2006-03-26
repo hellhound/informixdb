@@ -1,7 +1,7 @@
 INTRODUCTION
 ============
 
-This is informixdb 2.1, an Informix implementation of the Python
+This is informixdb 2.2, an Informix implementation of the Python
 Database API.  This release implements version 2.0 of the DB-API:
 
   http://www.python.org/topics/database/DatabaseAPI-2.0.html

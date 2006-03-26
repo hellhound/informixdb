@@ -1422,7 +1422,7 @@ static int bindInput(Cursor *cur, PyObject *vars)
   return 1;
 }
 
-static inline PyObject* gettypename(struct sqlvar_struct *var)
+static PyObject* gettypename(struct sqlvar_struct *var)
 {
 $ifdef HAVE_ESQL9;
   if (ISCOMPLEXTYPE(var->sqltype)||ISUDTTYPE(var->sqltype)) {

@@ -1666,6 +1666,7 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
     self->state = 1;
 
     EXEC SQL DESCRIBE :queryName INTO tdaOut;
+    ret_on_dberror_cursor(self, "DESCRIBE");
     self->daOut = tdaOut;
     self->stype = SQLCODE;
 
@@ -1793,6 +1794,7 @@ static PyObject *Cursor_executemany(Cursor *self,
     self->state = 1;
 
     EXEC SQL DESCRIBE :queryName INTO tdaOut;
+    ret_on_dberror_cursor(self, "DESCRIBE");
     self->daOut = tdaOut;
     self->stype = SQLCODE;
 

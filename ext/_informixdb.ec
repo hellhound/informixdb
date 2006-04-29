@@ -1232,7 +1232,7 @@ $endif;
   val = PyString_AS_STRING((PyStringObject*)sitem);
   n = strlen(val);
 $ifdef HAVE_ESQL9;
-  if (n >= 32768) {
+  if (ISUDTTYPE(sqltype) || ISCOMPLEXTYPE(sqltype)) {
     /* use lvarchar* instead */
     EXEC SQL BEGIN DECLARE SECTION;
     lvarchar **data;
@@ -1309,10 +1309,33 @@ $endif;
 
 static int ibindNone(struct sqlvar_struct *var, PyObject *item)
 {
-  var->sqltype = CSTRINGTYPE;
-  var->sqldata = NULL;
-  var->sqllen = 0;
-  *var->sqlind = -1;
+  int sqltype = var->sqltype & SQLTYPE;
+$ifdef HAVE_ESQL9;
+  if (ISUDTTYPE(sqltype) || ISCOMPLEXTYPE(sqltype)) {
+    /* use lvarchar* instead */
+    EXEC SQL BEGIN DECLARE SECTION;
+    lvarchar **data;
+    EXEC SQL END DECLARE SECTION;
+    data = malloc(sizeof(void*));
+    *data = 0;
+    ifx_var_flag(data, 0);
+    ifx_var_alloc(data, 1);
+    ifx_var_setlen(data, 0);
+    var->sqltype = SQLUDTVAR;
+    var->sqlxid = XID_LVARCHAR;
+    var->sqldata = *data;
+    var->sqllen  = sizeof(void*);
+    *var->sqlind = -1;
+    free( data );
+  }
+  else
+$endif;
+  {
+    var->sqltype = CSTRINGTYPE;
+    var->sqldata = NULL;
+    var->sqllen = 0;
+    *var->sqlind = -1;
+  }
   return 1;
 }
 

@@ -39,9 +39,18 @@
 #include <ctype.h>
 #undef loc_t
 
+#define _da_free(x) free(x)
+#define _loc_free(x) free(x)
+
 #ifdef _WIN32
 #include <value.h>
 #include <sqlproto.h>
+#ifdef IFX_THREAD
+#undef _da_free
+#undef _loc_free
+#define _da_free(x) SqlFreeMem(x, SQLDA_FREE)
+#define _loc_free(x) SqlFreeMem(x, LOC_BUFFER_FREE)
+#endif
 #else
 #include <values.h>
 #endif
@@ -1715,7 +1724,7 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
     } else {
       /* If available, copy information about input parameters into daIn */
       copyDescr(tdaIn, tdaOut);
-      free(self->daOut);
+      _da_free(self->daOut);
       self->daOut = NULL;
     }
 
@@ -1832,7 +1841,7 @@ static PyObject *Cursor_executemany(Cursor *self,
     } else {
       /* If available, copy information about input parameters into daIn */
       copyDescr(tdaIn, tdaOut);
-      free(self->daOut);
+      _da_free(self->daOut);
       self->daOut = NULL;
     }
 
@@ -2237,7 +2246,7 @@ static void cleanInputBinding(Cursor *cur)
         if (da->sqlvar[i].sqltype == CLOCATORTYPE) {
           loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
           if (loc->loc_buffer) {
-            free(loc->loc_buffer);
+            _loc_free(loc->loc_buffer);
           }
         }
 $ifdef HAVE_ESQL9;
@@ -2279,14 +2288,14 @@ static void deleteOutputBinding(Cursor *cur)
           (da->sqlvar[i].sqltype == CLOCATORTYPE)) {
         loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
         if (loc->loc_buffer)
-          free(loc->loc_buffer);
+          _loc_free(loc->loc_buffer);
       }
 $ifdef HAVE_ESQL9;
       if (ISSMARTBLOB(da->sqlvar[i].sqltype,da->sqlvar[i].sqlxid)) {
         free(da->sqlvar[i].sqldata);
       }
 $endif;
-    free(cur->daOut);
+    _da_free(cur->daOut);
     cur->daOut = 0;
   }
   if (cur->indOut) {

@@ -1777,9 +1777,9 @@ static PyObject *Cursor_executemany(Cursor *self,
 {
   struct sqlda *tdaIn = &self->daIn;
   struct sqlda *tdaOut = self->daOut;
-  PyObject *op, *params, *inputvars = 0;
+  PyObject *op, *params, *paramiter, *inputvars = 0;
   const char *sql;
-  int i, len;
+  int i;
   int rowcount = 0, inputDirty = 0, useInsertCursor;
   static char* kwdlist[] = { "operation", "seq_of_parameters", 0 };
   EXEC SQL BEGIN DECLARE SECTION;
@@ -1794,9 +1794,8 @@ static PyObject *Cursor_executemany(Cursor *self,
   if (!PyArg_ParseTupleAndKeywords(args, kwds, "sO", kwdlist, &sql, &params))
     return NULL;
   op = PyTuple_GET_ITEM(args, 0);
-  len = PySequence_Size(params);
-  if (len == -1) {
-    PyErr_SetString(PyExc_TypeError, "Parameter must be a sequence");
+  paramiter = PyObject_GetIter(params);
+  if (paramiter == NULL) {
     return NULL;
   }
 
@@ -1867,13 +1866,15 @@ static PyObject *Cursor_executemany(Cursor *self,
     self->state = 3;
   }
 
-  for (i=0; i<len; i++) {
-    inputvars = PySequence_GetItem(params, i);
+  while (inputvars = PyIter_Next(paramiter)) {
     if (inputDirty) {
       cleanInputBinding(self);
     }
-    if (!bindInput(self, inputvars))
+    if (!bindInput(self, inputvars)) {
+      Py_DECREF(inputvars);
+      Py_DECREF(paramiter);
       return 0;
+    }
     inputDirty = 1;
 
     if (self->stype == 0) {
@@ -1909,6 +1910,7 @@ static PyObject *Cursor_executemany(Cursor *self,
     }
     Py_DECREF(inputvars);
   }
+  Py_DECREF(paramiter);
   if (useInsertCursor) {
     Py_BEGIN_ALLOW_THREADS;
     EXEC SQL FLUSH :cursorName;

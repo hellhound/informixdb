@@ -440,6 +440,7 @@ typedef struct Cursor_t
 static int Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs);
 static void Cursor_dealloc(Cursor *self);
 static PyObject* Cursor_close(Cursor *self);
+static PyObject* Cursor_prepare(Cursor *self, PyObject *args, PyObject *kwds);
 static PyObject* Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds);
 static PyObject* Cursor_executemany(Cursor *self, PyObject *args, PyObject *kwds);
 static PyObject* Cursor_fetchone(Cursor *self);
@@ -459,6 +460,11 @@ Close the cursor now.\n\n\
 The cursor will be unusable from this point forward. Any\n\
 operations on it will raise an InterfaceError.");
 
+PyDoc_STRVAR(Cursor_prepare_doc,
+"prepare(operation)\n\n\
+Prepare an arbitrary SQL statement for later execution.\n\n\
+See cursor.execute for more information.");
+
 PyDoc_STRVAR(Cursor_execute_doc,
 "execute(operation [,parameters])\n\n\
 Execute an arbitrary SQL statement.\n\n\
@@ -466,6 +472,10 @@ Execute an arbitrary SQL statement.\n\n\
 placeholders, where either qmark-style\n\
 (SELECT * FROM names WHERE name = ?) or numeric-style\n\
 (SELECT * FROM names WHERE name = :1) may be used.\n\
+\n\
+To execute a previously prepared statement or to re-execute
+a previously executed statement, pass the cursor's 'command'
+attribute as the operation.
 \n\
 'parameters' is a sequence of values to be bound to the\n\
 placeholders in the SQL statement. The number of values in the\n\
@@ -554,6 +564,8 @@ Returns: The unmodified input sequence, because Informix doesn't\n\
 static PyMethodDef Cursor_methods[] = {
   { "close", (PyCFunction)Cursor_close, METH_NOARGS,
     Cursor_close_doc },
+  { "prepare", (PyCFunction)Cursor_prepare, METH_VARARGS|METH_KEYWORDS,
+    Cursor_prepare_doc },
   { "execute", (PyCFunction)Cursor_execute, METH_VARARGS|METH_KEYWORDS,
     Cursor_execute_doc },
   { "executemany", (PyCFunction)Cursor_executemany, METH_VARARGS|METH_KEYWORDS,
@@ -597,6 +609,8 @@ static PyMemberDef Cursor_members[] = {
     Cursor_errorhandler_doc },
   { "connection", T_OBJECT_EX, offsetof(Cursor, conn), 0,
     "Database connection associated with this cursor." },
+  { "command", T_OBJECT_EX, offsetof(Cursor, op), READONLY,
+    "Last prepared or executed command." },
   { NULL }
 };
 
@@ -1652,6 +1666,99 @@ $endif;
   }
 }
 
+static PyObject *do_prepare(Cursor *self, PyObject *op, const char *sql)
+{
+  struct sqlda *tdaIn = &self->daIn;
+  struct sqlda *tdaOut = self->daOut;
+  int i;
+  EXEC SQL BEGIN DECLARE SECTION;
+  char *queryName = self->queryName;
+  char *cursorName = self->cursorName;
+  char *newSql;
+  EXEC SQL END DECLARE SECTION;
+
+  clear_messages(self);
+  require_cursor_open(self);
+
+  doCloseCursor(self, 1);
+  deleteInputBinding(self);
+  deleteOutputBinding(self);
+
+  /* `newSql' may be shorter than but will never exceed length of `sql' */
+  newSql = malloc(strlen(sql) + 1);
+  if (!parseSql(self, newSql, sql)) {
+    free(newSql);
+    return 0;
+  }
+  EXEC SQL PREPARE :queryName FROM :newSql;
+  for (i=0; i<6; i++) self->sqlerrd[i] = sqlca.sqlerrd[i];
+  free(newSql);
+  ret_on_dberror_cursor(self, "PREPARE");
+  self->state = 1;
+
+  EXEC SQL DESCRIBE :queryName INTO tdaOut;
+  ret_on_dberror_cursor(self, "DESCRIBE");
+  self->daOut = tdaOut;
+  self->stype = SQLCODE;
+
+  if (self->stype == 0 || self->stype == SQ_EXECPROC) {
+    bindOutput(self);
+    switch (self->is_hold + 2*self->is_scroll) {
+      case 3:
+        EXEC SQL DECLARE :cursorName SCROLL CURSOR WITH HOLD FOR :queryName;
+        break;
+      case 2:
+        EXEC SQL DECLARE :cursorName SCROLL CURSOR FOR :queryName; break;
+      case 1:
+        EXEC SQL DECLARE :cursorName CURSOR WITH HOLD FOR :queryName; break;
+      case 0:
+        EXEC SQL DECLARE :cursorName CURSOR FOR :queryName; break;
+    }
+    ret_on_dberror_cursor(self, "DECLARE");
+    EXEC SQL FREE :queryName;
+    ret_on_dberror_cursor(self, "FREE");
+    self->state = 2;
+    self->pending_scroll = 0;
+    self->scroll_value = 0;
+  } else {
+    /* If available, copy information about input parameters into daIn */
+    copyDescr(tdaIn, tdaOut);
+    _da_free(self->daOut);
+    self->daOut = NULL;
+  }
+
+  /* cache operation reference */
+  Py_DECREF(self->op);
+  self->op = op;
+  Py_INCREF(op);
+
+  // No INCREF because the callers don't DECREF.
+  return Py_None;
+}
+
+static PyObject *Cursor_prepare(Cursor *self, PyObject *args, PyObject *kwds)
+{
+  PyObject *op;
+  const char *sql;
+  int i;
+  static char* kwdlist[] = { "operation", 0 };
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwdlist, &sql))
+    return NULL;
+  op = PyTuple_GET_ITEM(args, 0);
+
+  /* Make sure we talk to the right database. */
+  if (setConnection(self->conn)) return NULL;
+
+  if (do_prepare(self, op, sql)) {
+    Py_INCREF(Py_None);
+    return Py_None;
+  }
+  else {
+    return NULL;
+  }
+}
+
 static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
 {
   struct sqlda *tdaIn = &self->daIn;
@@ -1663,7 +1770,6 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
   EXEC SQL BEGIN DECLARE SECTION;
   char *queryName = self->queryName;
   char *cursorName = self->cursorName;
-  char *newSql;
   EXEC SQL END DECLARE SECTION;
 
   clear_messages(self);
@@ -1677,60 +1783,10 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
   /* Make sure we talk to the right database. */
   if (setConnection(self->conn)) return NULL;
 
-  if (op == self->op) {
-    doCloseCursor(self, 0);
-    cleanInputBinding(self);
-  } else {
-    doCloseCursor(self, 1);
-    deleteInputBinding(self);
-    deleteOutputBinding(self);
-
-    /* `newSql' may be shorter than but will never exceed length of `sql' */
-    newSql = malloc(strlen(sql) + 1);
-    if (!parseSql(self, newSql, sql)) {
-      free(newSql);
-      return 0;
+  if (self->op != op) {
+    if (!do_prepare(self, op, sql)) {
+      return NULL;
     }
-    EXEC SQL PREPARE :queryName FROM :newSql;
-    for (i=0; i<6; i++) self->sqlerrd[i] = sqlca.sqlerrd[i];
-    free(newSql);
-    ret_on_dberror_cursor(self, "PREPARE");
-    self->state = 1;
-
-    EXEC SQL DESCRIBE :queryName INTO tdaOut;
-    ret_on_dberror_cursor(self, "DESCRIBE");
-    self->daOut = tdaOut;
-    self->stype = SQLCODE;
-
-    if (self->stype == 0 || self->stype == SQ_EXECPROC) {
-      bindOutput(self);
-      switch (self->is_hold + 2*self->is_scroll) {
-        case 3:
-          EXEC SQL DECLARE :cursorName SCROLL CURSOR WITH HOLD FOR :queryName;
-          break;
-        case 2:
-          EXEC SQL DECLARE :cursorName SCROLL CURSOR FOR :queryName; break;
-        case 1:
-          EXEC SQL DECLARE :cursorName CURSOR WITH HOLD FOR :queryName; break;
-        case 0:
-          EXEC SQL DECLARE :cursorName CURSOR FOR :queryName; break;
-      }
-      ret_on_dberror_cursor(self, "DECLARE");
-      EXEC SQL FREE :queryName;
-      ret_on_dberror_cursor(self, "FREE");
-      self->state = 2;
-      self->pending_scroll = 0;
-      self->scroll_value = 0;
-    } else {
-      /* If available, copy information about input parameters into daIn */
-      copyDescr(tdaIn, tdaOut);
-      _da_free(self->daOut);
-      self->daOut = NULL;
-    }
-
-    /* cache operation reference */
-    self->op = op;
-    Py_INCREF(op);
   }
 
   if (!bindInput(self, inputvars))
@@ -1785,7 +1841,6 @@ static PyObject *Cursor_executemany(Cursor *self,
   EXEC SQL BEGIN DECLARE SECTION;
   char *queryName = self->queryName;
   char *cursorName = self->cursorName;
-  char *newSql;
   EXEC SQL END DECLARE SECTION;
 
   clear_messages(self);
@@ -1802,48 +1857,10 @@ static PyObject *Cursor_executemany(Cursor *self,
   /* Make sure we talk to the right database. */
   if (setConnection(self->conn)) return NULL;
 
-  if (op == self->op) {
-    doCloseCursor(self, 0);
-    cleanInputBinding(self);
-    useInsertCursor =
-     (self->conn->has_commit&&!self->conn->autocommit&&self->stype==SQ_INSERT);
-  } else {
-    doCloseCursor(self, 1);
-    deleteInputBinding(self);
-    deleteOutputBinding(self);
-
-    /* `newSql' may be shorter than but will never exceed length of `sql' */
-    newSql = malloc(strlen(sql) + 1);
-    if (!parseSql(self, newSql, sql)) {
-      free(newSql);
-      return 0;
+  if (self->op != op) {
+    if (!do_prepare(self, op, sql)) {
+      return NULL;
     }
-    EXEC SQL PREPARE :queryName FROM :newSql;
-    for (i=0; i<6; i++) self->sqlerrd[i] = sqlca.sqlerrd[i];
-    free(newSql);
-    ret_on_dberror_cursor(self, "PREPARE");
-    self->state = 1;
-
-    EXEC SQL DESCRIBE :queryName INTO tdaOut;
-    ret_on_dberror_cursor(self, "DESCRIBE");
-    self->daOut = tdaOut;
-    self->stype = SQLCODE;
-
-    if (self->stype == 0) {
-      bindOutput(self);
-
-      EXEC SQL DECLARE :cursorName CURSOR FOR :queryName;
-      ret_on_dberror_cursor(self, "DECLARE");
-      EXEC SQL FREE :queryName;
-      ret_on_dberror_cursor(self, "FREE");
-      self->state = 2;
-    } else {
-      /* If available, copy information about input parameters into daIn */
-      copyDescr(tdaIn, tdaOut);
-      _da_free(self->daOut);
-      self->daOut = NULL;
-    }
-
     useInsertCursor =
      (self->conn->has_commit&&!self->conn->autocommit&&self->stype==SQ_INSERT);
 
@@ -1854,10 +1871,10 @@ static PyObject *Cursor_executemany(Cursor *self,
       ret_on_dberror_cursor(self, "FREE");
       self->state = 2;
     }
-
-    /* cache operation reference */
-    self->op = op;
-    Py_INCREF(op);
+  }
+  else {
+    useInsertCursor =
+     (self->conn->has_commit&&!self->conn->autocommit&&self->stype==SQ_INSERT);
   }
 
   if (useInsertCursor) {
@@ -2438,7 +2455,8 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   self->indOut = 0;
   self->parmIdx = 0;
   self->stype = -1;
-  self->op = 0;
+  Py_INCREF(Py_None);
+  self->op = Py_None;
   self->is_hold = 0;
   self->is_scroll = 0;
   self->pending_scroll = 0;

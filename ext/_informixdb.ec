@@ -473,9 +473,9 @@ placeholders, where either qmark-style\n\
 (SELECT * FROM names WHERE name = ?) or numeric-style\n\
 (SELECT * FROM names WHERE name = :1) may be used.\n\
 \n\
-To execute a previously prepared statement or to re-execute
-a previously executed statement, pass the cursor's 'command'
-attribute as the operation.
+To execute a previously prepared statement or to re-execute\n\
+a previously executed statement, pass the cursor's 'command'\n\
+attribute as the operation.\n\
 \n\
 'parameters' is a sequence of values to be bound to the\n\
 placeholders in the SQL statement. The number of values in the\n\
@@ -1680,6 +1680,12 @@ static PyObject *do_prepare(Cursor *self, PyObject *op, const char *sql)
   clear_messages(self);
   require_cursor_open(self);
 
+  if (op == self->op) {
+    doCloseCursor(self, 0);
+    cleanInputBinding(self);
+    return Py_None;
+  }
+
   doCloseCursor(self, 1);
   deleteInputBinding(self);
   deleteOutputBinding(self);
@@ -1783,10 +1789,8 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
   /* Make sure we talk to the right database. */
   if (setConnection(self->conn)) return NULL;
 
-  if (self->op != op) {
-    if (!do_prepare(self, op, sql)) {
-      return NULL;
-    }
+  if (!do_prepare(self, op, sql)) {
+    return NULL;
   }
 
   if (!bindInput(self, inputvars))
@@ -1857,27 +1861,23 @@ static PyObject *Cursor_executemany(Cursor *self,
   /* Make sure we talk to the right database. */
   if (setConnection(self->conn)) return NULL;
 
-  if (self->op != op) {
-    if (!do_prepare(self, op, sql)) {
-      return NULL;
-    }
-    useInsertCursor =
-     (self->conn->has_commit&&!self->conn->autocommit&&self->stype==SQ_INSERT);
+  if (!do_prepare(self, op, sql)) {
+    return NULL;
+  }
+  useInsertCursor =
+   (self->conn->has_commit&&!self->conn->autocommit&&self->stype==SQ_INSERT);
 
-    if (useInsertCursor) {
+  if (useInsertCursor) {
+    /* If do_prepare closed and reprepared the query, redeclare the
+       insert cursor */
+    if (self->state==1) {
       EXEC SQL DECLARE :cursorName CURSOR FOR :queryName;
       ret_on_dberror_cursor(self, "DECLARE");
       EXEC SQL FREE :queryName;
       ret_on_dberror_cursor(self, "FREE");
       self->state = 2;
     }
-  }
-  else {
-    useInsertCursor =
-     (self->conn->has_commit&&!self->conn->autocommit&&self->stype==SQ_INSERT);
-  }
 
-  if (useInsertCursor) {
     EXEC SQL OPEN :cursorName;
     ret_on_dberror_cursor(self, "OPEN");
     self->state = 3;
@@ -1931,8 +1931,9 @@ static PyObject *Cursor_executemany(Cursor *self,
   if (useInsertCursor) {
     Py_BEGIN_ALLOW_THREADS;
     EXEC SQL FLUSH :cursorName;
-    Py_END_ALLOW_THREADS;
     rowcount += sqlca.sqlerrd[2];
+    EXEC SQL CLOSE :cursorName;
+    Py_END_ALLOW_THREADS;
   }
 
   self->rowcount = rowcount;

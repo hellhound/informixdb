@@ -421,6 +421,7 @@ typedef struct Cursor_t
   short *indOut;
   int *parmIdx;
   int stype; /* statement type */
+  int has_output;
   PyObject *op; /* last executed operation */
   long sqlerrd[6];
   long rowcount;
@@ -1706,8 +1707,10 @@ static PyObject *do_prepare(Cursor *self, PyObject *op, const char *sql)
   ret_on_dberror_cursor(self, "DESCRIBE");
   self->daOut = tdaOut;
   self->stype = SQLCODE;
+  self->has_output = 
+    (self->stype == 0 || (self->stype == SQ_EXECPROC && tdaOut->sqld > 0) );
 
-  if (self->stype == 0 || self->stype == SQ_EXECPROC) {
+  if (self->has_output) {
     bindOutput(self);
     switch (self->is_hold + 2*self->is_scroll) {
       case 3:
@@ -1796,7 +1799,7 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
   if (!bindInput(self, inputvars))
     return 0;
 
-  if (self->stype == 0 || self->stype == SQ_EXECPROC) {
+  if (self->has_output) {
     EXEC SQL OPEN :cursorName USING DESCRIPTOR tdaIn;
     ret_on_dberror_cursor(self, "OPEN");
     self->state = 3;
@@ -1894,7 +1897,7 @@ static PyObject *Cursor_executemany(Cursor *self,
     }
     inputDirty = 1;
 
-    if (self->stype == 0) {
+    if (self->has_output) {
       EXEC SQL OPEN :cursorName USING DESCRIPTOR tdaIn;
       ret_on_dberror_cursor(self, "OPEN");
       self->state = 3;
@@ -2352,7 +2355,7 @@ static void doCloseCursor(Cursor *cur, int doFree)
   char *queryName = cur->queryName;
   EXEC SQL END DECLARE SECTION;
 
-  if (cur->stype == 0) {
+  if (cur->has_output) {
     /* if cursor is opened, close it */
     if (cur->state == 3) {
       EXEC SQL CLOSE :cursorName;

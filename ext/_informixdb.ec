@@ -1207,7 +1207,7 @@ static int ibindDate(struct sqlvar_struct *var, PyObject *date)
 {
   short mdy_date[3];
   int ret;
-  long *d= (long*)malloc(sizeof(long));
+  int4 *d= (int4*)malloc(sizeof(int4));
   mdy_date[2] = PyDateTime_GET_YEAR(date);
   mdy_date[1] = PyDateTime_GET_DAY(date);
   mdy_date[0] = PyDateTime_GET_MONTH(date);
@@ -1220,7 +1220,7 @@ static int ibindDate(struct sqlvar_struct *var, PyObject *date)
   }
 
   var->sqldata = (char*)d;
-  var->sqllen = sizeof(long);
+  var->sqllen = sizeof(int4);
   var->sqltype = CDATETYPE;
   *var->sqlind = 0;
 
@@ -1951,7 +1951,7 @@ static PyObject *doCopy(/* const */ void *data,
   case SQLDATE:
   {
     short mdy_date[3];
-    rjulmdy(*(long*)data, mdy_date);
+    rjulmdy(*(int4*)data, mdy_date);
     return PyDate_FromDate(mdy_date[2], mdy_date[0], mdy_date[1]);
   }
   case SQLDTIME:

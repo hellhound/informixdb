@@ -1057,6 +1057,8 @@ static PyObject *Connection_rollback(Connection *self)
       ret_on_dberror(self, NULL, "ROLLBACK");
     }
   } else {
+    /* force error -256, Transaction not available. */
+    EXEC SQL ROLLBACK WORK;
     error_handle(self, NULL,
                  ExcNotSupportedError, dberror_value("ROLLBACK"));
     return NULL;
@@ -1749,7 +1751,6 @@ static PyObject *Cursor_prepare(Cursor *self, PyObject *args, PyObject *kwds)
 {
   PyObject *op;
   const char *sql;
-  int i;
   static char* kwdlist[] = { "operation", 0 };
 
   if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwdlist, &sql))
@@ -1771,7 +1772,6 @@ static PyObject *Cursor_prepare(Cursor *self, PyObject *args, PyObject *kwds)
 static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
 {
   struct sqlda *tdaIn = &self->daIn;
-  struct sqlda *tdaOut = self->daOut;
   PyObject *op, *inputvars=NULL;
   const char *sql;
   int i;
@@ -1839,7 +1839,6 @@ static PyObject *Cursor_executemany(Cursor *self,
                                     PyObject *kwds)
 {
   struct sqlda *tdaIn = &self->daIn;
-  struct sqlda *tdaOut = self->daOut;
   PyObject *op, *params, *paramiter, *inputvars = 0;
   const char *sql;
   int i;
@@ -1886,7 +1885,7 @@ static PyObject *Cursor_executemany(Cursor *self,
     self->state = 3;
   }
 
-  while (inputvars = PyIter_Next(paramiter)) {
+  while ((inputvars = PyIter_Next(paramiter))) {
     if (inputDirty) {
       cleanInputBinding(self);
     }

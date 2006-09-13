@@ -1,7 +1,7 @@
 INTRODUCTION
 ============
 
-This is informixdb 2.2, an Informix implementation of the Python
+This is informixdb 2.3, an Informix implementation of the Python
 Database API.  This release implements version 2.0 of the DB-API:
 
   http://www.python.org/topics/database/DatabaseAPI-2.0.html
@@ -76,6 +76,19 @@ compiler that produced the Python interpreter you're using.
 NEWS
 ====
 
+From 2.2 to 2.3:
+- Allow parameter list for executemany() to be arbitrary iterable objects.
+- .prepare() method and .command attribute for explicitly prepared statements
+- Bug fixes
+  * Rare crashes caused by missing error check in DESCRIBE step.
+  * Inconsistent UDT input binding caused SQLCODE -1820 in bulk insert
+    (executemany) if UDT contents went back and forth across 32K size
+    boundary or between null and non-null.
+  * EXECUTE PROCEDURE erroneously attempted to open a results cursor for
+    procedures that don't return results.
+  * Date columns were read incorrectly on 64 bit platforms due to mixup
+    of int4 versus long.
+  
 From 2.1 to 2.2:
 - Support for BOOLEAN columns
 - DECIMAL and MONEY columns can be fetched as decimal.Decimal instances
@@ -258,6 +271,7 @@ Release  Date        By
 2.0      2005-10-22  Carsten Haese
 2.1      2005-11-21  Carsten Haese
 2.2      2006-03-26  Carsten Haese
+2.3      TBD         Carsten Haese
 
 --
 Carsten Haese <chaese@users.sourceforge.net>

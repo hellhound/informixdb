@@ -2,9 +2,9 @@
  InformixDB Documentation
 ==========================
 
-:Authors: Daniel Smertnig
-:Version: informixdb 2.2
-:Date: 2006-03-26
+:Authors: Daniel Smertnig and Carsten Haese
+:Version: informixdb 2.3
+:Date: TBD
 :Homepage: `InformixDB on Sourceforge`_
 
 .. contents:: InformixDB
@@ -194,10 +194,33 @@ evaluated by comparing it to the global type objects defined by the
 Fast execution of batch statements
 ----------------------------------
 
+Statement caching
+,,,,,,,,,,,,,,,,,
 When `execute` is called multiple times with the same SQL statement object
 on the same Cursor object but different arguments the statement is prepared
-only once. 
+only once. This mechanism is called statement caching. Each Cursor object
+only caches its most recent query. If you need to execute different queries
+multiple times while still making use of statement caching, you will need to
+create one cursor for each query.
 
+Note: Statement caching operates based on the identity of the statement
+string, not on the contents, because an identity check is much faster
+than an equality check. In practice this means that::
+
+    >>> cursor.execute("UPDATE names SET age = :2 WHERE last = :1", params1)
+    >>> cursor.execute("UPDATE names SET age = :2 WHERE last = :1", params2)
+
+will not make use of statement caching, since each command will instantiate
+its own copy of the query string, which will result in two query strings that
+are equal to each other but not identical. To gurantee that statement caching
+is used, you need to do the following::
+
+    >>> query_string = "UPDATE names SET age = :2 WHERE last = :1"
+    >>> cursor.execute(query_string, params1)
+    >>> cursor.execute(query_string, params2)
+
+executemany()
+,,,,,,,,,,,,,
 `executemany` can be used to execute the same statement with different
 parameters multiple times. It takes a sequence of parameter-sequences as
 taken by `execute` as its second argument and executes the statement for
@@ -207,6 +230,32 @@ which can result in a huge performance boost, especially over a network::
     >>> cursor.executemany("INSERT INTO names VALUES(:1,:2,:3)",
     ...     [ ('no', 'more', 12), ('names', 'left', 34) ]
     ... )
+
+`(New in version 2.3)`: In earlier versions, the parameter list for
+`executemany` had to be a true sequence (i.e. list or tuple) of sequences.
+Beginning with version 2.3, it is allowed to be any iterable object that
+yields sequences.
+
+Explicitly prepared statements
+,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,
+`(new in version 2.3)`
+
+The method `Cursor.prepare` explicitly prepares a query for subsequent
+execution by the same cursor, and the attribute `command` contains the query
+string that the cursor has most recently prepared or executed. Note that
+`prepare` simply caches the statement like `execute` does, except
+that the query is not immediately executed. Consequently, to prepare more than
+one statement, you'll need to create more than one cursor.
+
+Since `prepare` is just statement caching in disguise, it does not offer
+any additional performance benefits, but it makes your code more readable.
+The following code snippet is equivalent to the above example of guaranteed
+statement caching, but it conveys in a clearer fashion that a statement is
+prepared once and executed twice::
+
+   >>> cursor.prepare("UPDATE names SET age = :2 WHERE first = :1")
+   >>> cursor.execute(cursor.command, params1)
+   >>> cursor.execute(cursor.command, params2)
 
 Using named cursors
 -------------------

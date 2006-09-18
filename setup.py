@@ -76,10 +76,7 @@ class build_ext(_build_ext):
         if esqlversion==None:
           esqlversion = 850
         if esqlversion >= 900:
-          if get_platform()=="win32":
-            self.esql_parts.append("-edHAVE_ESQL9")
-          else:
-            self.esql_parts.append("-EDHAVE_ESQL9")
+          self.esql_parts.append("-EDHAVE_ESQL9")
 
         # find esql libs/objects
         cout = os.popen(' '.join(self.esql_parts + [ '-libs' ]),'r')

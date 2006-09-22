@@ -451,9 +451,10 @@ static PyObject* Cursor_scroll(Cursor *self, PyObject *args, PyObject *kwds);
 static PyObject* Cursor_setinputsizes(Cursor *self, PyObject *args, PyObject *kwds);
 static PyObject* Cursor_setoutputsize(Cursor *self, PyObject *args, PyObject *kwds);
 static PyObject* Cursor_callproc(Cursor *self, PyObject *args, PyObject *kwds);
-static PyObject* Cursor_iter(Cursor *self);
+static PyObject* Cursor_self(Cursor *self);
 static PyObject* Cursor_iternext(Cursor *self);
 static PyObject *Cursor_getsqlerrd(Cursor *self, void *closure);
+static PyObject *Cursor_exit(Cursor *self, PyObject *args);
 
 PyDoc_STRVAR(Cursor_close_doc,
 "close()\n\n\
@@ -562,6 +563,12 @@ Returns: The unmodified input sequence, because Informix doesn't\n\
          support \"out\" or \"in/out\" arguments for stored\n\
          procedures.");
 
+PyDoc_STRVAR(Cursor_enter_doc,
+"__enter__() -> self.");
+
+PyDoc_STRVAR(Cursor_exit_doc,
+"__exit__(*excinfo) -> None.  Closes the cursor.");
+
 static PyMethodDef Cursor_methods[] = {
   { "close", (PyCFunction)Cursor_close, METH_NOARGS,
     Cursor_close_doc },
@@ -585,6 +592,10 @@ static PyMethodDef Cursor_methods[] = {
     Cursor_setoutputsize_doc },
   { "callproc", (PyCFunction)Cursor_callproc, METH_VARARGS|METH_KEYWORDS,
     Cursor_callproc_doc },
+  { "__enter__", (PyCFunction)Cursor_self, METH_NOARGS,
+    Cursor_enter_doc },
+  { "__exit__", (PyCFunction)Cursor_exit, METH_VARARGS,
+    Cursor_exit_doc },
   { NULL }
 };
 
@@ -660,7 +671,7 @@ static PyTypeObject Cursor_type = {
   0,                                  /* tp_clear */
   0,                                  /* tp_richcompare */
   0,                                  /* tp_weaklistoffset */
-  (getiterfunc)Cursor_iter,           /* tp_iter */
+  (getiterfunc)Cursor_self,           /* tp_iter */
   (iternextfunc)Cursor_iternext,      /* tp_iternext */
   Cursor_methods,                     /* tp_methods */
   Cursor_members,                     /* tp_members */
@@ -705,6 +716,8 @@ static PyObject *Connection_cursor(Connection *self, PyObject *args, PyObject *k
 static PyObject *Connection_commit(Connection *self);
 static PyObject *Connection_rollback(Connection *self);
 static PyObject *Connection_close(Connection *self);
+static PyObject *Connection_self(Connection *self);
+static PyObject *Connection_exit(Connection *self, PyObject *args);
 $ifdef HAVE_ESQL9;
 static PyObject *Connection_Sblob(Connection *self, PyObject *args, PyObject *kwds);
 $endif;
@@ -751,6 +764,12 @@ For databases that have transactions enabled an implicit rollback\n\
 is performed when the connection is closed, so be sure to\n\
 commit any outstanding operations before closing a Connection.");
 
+PyDoc_STRVAR(Connection_enter_doc,
+"__enter__() -> self.");
+
+PyDoc_STRVAR(Connection_exit_doc,
+"__exit__(*excinfo) -> None.  Closes the connection.");
+
 $ifdef HAVE_ESQL9;
 PyDoc_STRVAR(Connection_Sblob_doc, "\
 Sblob(...) -> Sblob object\n\n\
@@ -786,6 +805,10 @@ static PyMethodDef Connection_methods[] = {
     Connection_rollback_doc },
   { "close", (PyCFunction)Connection_close, METH_NOARGS,
     Connection_close_doc },
+  { "__enter__", (PyCFunction)Connection_self, METH_NOARGS,
+    Connection_enter_doc },
+  { "__exit__", (PyCFunction)Connection_exit, METH_VARARGS,
+    Connection_exit_doc },
 $ifdef HAVE_ESQL9;
   { "Sblob", (PyCFunction)Connection_Sblob, METH_VARARGS|METH_KEYWORDS,
     Connection_Sblob_doc },
@@ -1000,6 +1023,21 @@ static PyObject *Connection_close(Connection *self)
   /* success */
   Py_INCREF(Py_None);
   return Py_None;
+}
+
+static PyObject *Connection_self(Connection *self)
+{
+  Py_INCREF(self);
+  return (PyObject*)self;
+}
+
+static PyObject *Connection_exit(Connection *self, PyObject *args)
+{
+  PyObject *ret = Connection_close(self);
+  if (!ret) 
+    return NULL;
+  Py_DECREF(ret);
+  Py_RETURN_NONE;
 }
 
 static void Connection_dealloc(Connection *self)
@@ -2418,6 +2456,15 @@ static PyObject *Cursor_close(Cursor *self)
   return Py_None;
 }
 
+static PyObject *Cursor_exit(Cursor *self, PyObject *args)
+{
+  PyObject *ret = Cursor_close(self);
+  if (!ret) 
+    return NULL;
+  Py_DECREF(ret);
+  Py_RETURN_NONE;
+}
+
 static int
 Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
 {
@@ -2489,7 +2536,7 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   return 0;
 }
 
-static PyObject* Cursor_iter(Cursor *self)
+static PyObject* Cursor_self(Cursor *self)
 {
   Py_INCREF(self);
   return (PyObject*)self;

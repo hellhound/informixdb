@@ -79,6 +79,7 @@ NEWS
 From 2.2 to 2.3:
 - Allow parameter list for executemany() to be arbitrary iterable objects.
 - .prepare() method and .command attribute for explicitly prepared statements
+- Python 2.5 compatibility
 - Bug fixes
   * Rare crashes caused by missing error check in DESCRIBE step.
   * Inconsistent UDT input binding caused SQLCODE -1820 in bulk insert

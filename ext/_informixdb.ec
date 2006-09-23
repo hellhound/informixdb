@@ -1,7 +1,7 @@
 /************************************************************************
  *                Copyright (c) 1997 by IV DocEye AB
  *             Copyright (c) 1999 by Stephen J. Turner
- *               Copyright (c) 2005 by Carsten Haese
+ *               Copyright (c) 2006 by Carsten Haese
  *
  * By obtaining, using, and/or copying this software and/or its
  * associated documentation, you agree that you have read, understood,
@@ -38,6 +38,12 @@
 #define loc_t temp_loc_t
 #include <ctype.h>
 #undef loc_t
+
+/* Make sure that we can use Py_ssize_t the way Python 2.5 expects us to
+   while remaining compatible with older Python versions. */
+#if PY_VERSION_HEX < 0x02050000
+typedef int Py_ssize_t;
+#endif
 
 #define _da_free(x) free(x)
 #define _loc_free(x) free(x)
@@ -1185,7 +1191,7 @@ static int doParse(parseContext *ct)
 static int ibindBinary(struct sqlvar_struct *var, PyObject *item)
 {
   char *buf;
-  int n;
+  Py_ssize_t n;
   loc_t *loc;
 
   if (PyObject_AsReadBuffer(item, (const void**)&buf, &n) == -1) {
@@ -1194,13 +1200,13 @@ static int ibindBinary(struct sqlvar_struct *var, PyObject *item)
 
   loc = (loc_t*) malloc(sizeof(loc_t));
   loc->loc_loctype = LOCMEMORY;
-  loc->loc_buffer = malloc(n);
-  loc->loc_bufsize = n;
-  loc->loc_size = n;
+  loc->loc_buffer = malloc((int)n);
+  loc->loc_bufsize = (int)n;
+  loc->loc_size = (int)n;
   loc->loc_oflags = 0;
   loc->loc_mflags = 0;
   loc->loc_indicator = 0;
-  memcpy(loc->loc_buffer, buf, n);
+  memcpy(loc->loc_buffer, buf, (int)n);
 
   var->sqldata = (char *) loc;
   var->sqllen = sizeof(loc_t);
@@ -1474,7 +1480,7 @@ static int parseSql(Cursor *cur, register char *out, const char *in)
 static int bindInput(Cursor *cur, PyObject *vars)
 {
   struct sqlvar_struct *var = cur->daIn.sqlvar;
-  int n_vars = vars ? PyObject_Length(vars) : 0;
+  int n_vars = vars ? (int)PyObject_Length(vars) : 0;
   int i;
   int maxp=0;
 
@@ -2158,7 +2164,7 @@ $endif;
   {
     PyObject *buffer;
     char *b_mem;
-    int b_len;
+    Py_ssize_t b_len;
     loc_t *l = (loc_t*)data;
 
     l->loc_mflags |= LOC_ALLOC;
@@ -2169,7 +2175,7 @@ $endif;
       return NULL;
     }
 
-    memcpy(b_mem, l->loc_buffer, b_len);
+    memcpy(b_mem, l->loc_buffer, (int)b_len);
     return buffer;
   } /* case SQLTEXT */
   } /* switch */
@@ -2260,7 +2266,7 @@ static PyObject *Connection_cursor(Connection *self, PyObject *args, PyObject *k
   a = PyTuple_New(PyTuple_Size(args) + 1);
   Py_INCREF(self);
   PyTuple_SET_ITEM(a, 0, (PyObject*)self);
-  for (i = 0; i < PyTuple_Size(args); ++i) {
+  for (i = 0; i < (int)PyTuple_Size(args); ++i) {
     PyObject *o = PyTuple_GetItem(args, i);
     Py_INCREF(o);
     PyTuple_SET_ITEM(a, i+1, o);
@@ -2283,7 +2289,7 @@ static PyObject *Connection_Sblob(Connection *self, PyObject *args, PyObject *kw
   Py_INCREF(self);
   PyTuple_SET_ITEM(a, 0, (PyObject*)self);
   PyTuple_SET_ITEM(a, 1, PyInt_FromLong(1));
-  for (i = 0; i < PyTuple_Size(args); ++i) {
+  for (i = 0; i < (int)PyTuple_Size(args); ++i) {
     PyObject *o = PyTuple_GetItem(args, i);
     Py_INCREF(o);
     PyTuple_SET_ITEM(a, i+2, o);
@@ -2760,7 +2766,7 @@ static PyObject *Cursor_callproc(Cursor *self, PyObject *args, PyObject *kwds)
       return NULL;
     }
 
-    p_count = PySequence_Length(params);
+    p_count = (int)PySequence_Length(params);
 
     p_str = malloc(p_count * 2);
 
@@ -2928,7 +2934,7 @@ static PyObject* DatabaseError_str(PyObject* self, PyObject* args)
 
   f = PyString_FromString("%s: %s\n");
 
-  for (i = 0; i < PyList_Size(diags); ++i) {
+  for (i = 0; i < (int)PyList_Size(diags); ++i) {
     PyObject* d = PyList_GetItem(diags, i);
     a = Py_BuildValue("(OO)", PyDict_GetItemString(d, "sqlstate"),
                               PyDict_GetItemString(d, "message"));

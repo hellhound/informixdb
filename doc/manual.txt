@@ -60,6 +60,25 @@ forward all operations on the `Connection` object or any of its associated
 closed upon deallocation (this requires all `Cursor` objects which use
 the connection to be closed or deallocated first).
 
+`New in version 2.3`: Connections and cursors support the context management
+protocol for Python 2.5 `with` blocks. This allows code like this::
+
+    conn = informixdb.connect(...)
+    try:
+       cur = conn.cursor()
+       try:
+          # do something with cur
+       finally:
+          cur.close()
+    finally:
+       conn.close()
+
+to be written in Python 2.5 more concisely as::
+
+    with informixdb.connect(...) as conn:
+       with conn.cursor() as cur:
+          # do something with cur
+
 Executing SQL statements
 ========================
 

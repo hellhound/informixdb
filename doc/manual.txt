@@ -4,7 +4,7 @@
 
 :Authors: Daniel Smertnig and Carsten Haese
 :Version: informixdb 2.3
-:Date: TBD
+:Date: 2006-10-01
 :Homepage: `InformixDB on Sourceforge`_
 
 .. contents:: InformixDB

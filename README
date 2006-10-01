@@ -62,10 +62,10 @@ which will install the package into the appropriate site-specific library path.
 INSTALLATION (Win32)
 ====================
 
-A Windows installer for Python 2.4 is available for download at
-http://informixdb.sourceforge.net/. Download it and run it to install
-the InformixDB module. Note that you'll need the Informix Client SDK
-to use the InformixDB module.
+Windows installers for Python 2.4 and 2.5 are available for download at
+http://informixdb.sourceforge.net/. Download the appropriate installer
+and run it to install the InformixDB module. Note that you'll need the
+Informix Client SDK or Informix Connect to use the InformixDB module.
 
 If you're using a different version of Python, you'll have to compile
 InformixDB from the sources, following the same steps as for a Unix
@@ -272,7 +272,7 @@ Release  Date        By
 2.0      2005-10-22  Carsten Haese
 2.1      2005-11-21  Carsten Haese
 2.2      2006-03-26  Carsten Haese
-2.3      TBD         Carsten Haese
+2.3      2006-10-01  Carsten Haese
 
 --
 Carsten Haese <chaese@users.sourceforge.net>

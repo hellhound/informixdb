@@ -39,6 +39,10 @@
 #include <ctype.h>
 #undef loc_t
 
+#ifndef Py_RETURN_NONE
+#define Py_RETURN_NONE return Py_INCREF(Py_None), Py_None
+#endif
+
 /* Make sure that we can use Py_ssize_t the way Python 2.5 expects us to
    while remaining compatible with older Python versions. */
 #if PY_VERSION_HEX < 0x02050000

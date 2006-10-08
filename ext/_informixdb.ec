@@ -2202,8 +2202,9 @@ $ifdef HAVE_ESQL9;
   }
   if (ISCOMPLEXTYPE(type)||ISUDTTYPE(type)) {
     PyObject *result;
+    Py_ssize_t len = ifx_var_getlen(&data);
     char *lvcharbuf = ifx_var_getdata(&data);
-    result = PyString_FromString(lvcharbuf);
+    result = PyString_FromStringAndSize(lvcharbuf,len-1);
     ifx_var_dealloc(&data);
     return result;
   }

@@ -3,8 +3,8 @@
 ==========================
 
 :Authors: Daniel Smertnig and Carsten Haese
-:Version: informixdb 2.3
-:Date: 2006-10-01
+:Version: informixdb 2.4
+:Date: TBD
 :Homepage: `InformixDB on Sourceforge`_
 
 .. contents:: InformixDB
@@ -438,6 +438,20 @@ InformixDB:
 extended types, user-defined types (IDS) (`new in version 2.1`)
     Complex and opaque types are mapped to their string representation.
     Distinct types are mapped like the type from which they are derived.
+
+    `New in version 2.4`: If desired, opaque types can be fetched in their
+    internal binary representation. The cursor attribute ``binary_types``
+    is a dictionary that controls which opaque types are fetched in binary
+    format.
+
+    When a query returns values of an opaque type, the type name is looked up
+    in the cursor's ``binary_types`` dictionary. If the type name is found
+    and has a true value, the contents will be read in binary format.
+    Otherwise, the contents will be read in text format.
+
+    Connection objects have a ``binary_types`` dictionary that serves as the
+    default for the cursors that the connection creates. This dictionary is
+    empty by default.
 
 ``NULL``
     SQL ``NULL`` is represented by Python's ``None`` when binding parameters

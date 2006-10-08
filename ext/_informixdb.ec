@@ -446,6 +446,7 @@ typedef struct Cursor_t
 #endif
   PyObject *messages;
   PyObject *errorhandler;
+  PyObject *binary_types;
 } Cursor;
 
 static int Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs);
@@ -618,6 +619,10 @@ PyDoc_STRVAR(Cursor_errorhandler_doc,
 See also: Connection.errorhandler"
 );
 
+PyDoc_STRVAR(Cursor_binary_types_doc,
+"Dictionary that controls if opaque types are read in binary format.\n\n\
+See also: Connection.binary_types");
+
 static PyMemberDef Cursor_members[] = {
   { "description", T_OBJECT_EX, offsetof(Cursor, description), READONLY,
     "Information about result columns." },
@@ -633,6 +638,8 @@ static PyMemberDef Cursor_members[] = {
     "Database connection associated with this cursor." },
   { "command", T_OBJECT_EX, offsetof(Cursor, op), READONLY,
     "Last prepared or executed command." },
+  { "binary_types", T_OBJECT_EX, offsetof(Cursor, binary_types), READONLY,
+    Cursor_binary_types_doc }, 
   { NULL }
 };
 
@@ -713,6 +720,7 @@ typedef struct Connection_t
   PyObject *messages;
   PyObject *errorhandler;
   int autocommit;
+  PyObject *binary_types;
 } Connection;
 
 static int setConnection(Connection*);
@@ -844,11 +852,23 @@ The default (if errorhandler is None) is to append the error/warning\n\
 to the messages list and raise an exception if the errorclass is not\n\
 a Warning.");
 
+PyDoc_STRVAR(Connection_binary_types_doc,
+"Dictionary that controls if opaque types are read in binary format.\n\n\
+When a query returns an opaque type, its type name is looked up in\n\
+this dictionary. If an entry is present and has a true value, the\n\
+values are fetched in binary (internal) format. Otherwise, values\n\
+are fetched in text (external) format.\n\n\
+By default, this dictionary is empty. Cursors make a copy of this\n\
+dictionary when they are created, which allows this setting to be\n\
+overridden on a per-cursor basis.");
+
 static PyMemberDef Connection_members[] = {
   { "messages", T_OBJECT_EX, offsetof(Connection, messages), READONLY,
     Connection_messages_doc },
   { "errorhandler", T_OBJECT_EX, offsetof(Connection, errorhandler), 0,
     Connection_errorhandler_doc },
+  { "binary_types", T_OBJECT_EX, offsetof(Connection, binary_types), READONLY,
+    Connection_binary_types_doc },
   { NULL }
 };
 
@@ -1196,26 +1216,52 @@ static int ibindBinary(struct sqlvar_struct *var, PyObject *item)
 {
   char *buf;
   Py_ssize_t n;
-  loc_t *loc;
 
   if (PyObject_AsReadBuffer(item, (const void**)&buf, &n) == -1) {
     return 0;
   }
 
-  loc = (loc_t*) malloc(sizeof(loc_t));
-  loc->loc_loctype = LOCMEMORY;
-  loc->loc_buffer = malloc((int)n);
-  loc->loc_bufsize = (int)n;
-  loc->loc_size = (int)n;
-  loc->loc_oflags = 0;
-  loc->loc_mflags = 0;
-  loc->loc_indicator = 0;
-  memcpy(loc->loc_buffer, buf, (int)n);
+$ifdef HAVE_ESQL9;
+  /* If the target column is an opaque type, bind the buffer contents
+     as a var binary. This, in combination with the fact that the binary
+     contents of opaque types are returned as a buffer, allows for
+     seamless select-insert/update roundtrips of opaque types in binary
+     format. */
+  if (ISUDTTYPE(var->sqltype)) {
+    EXEC SQL BEGIN DECLARE SECTION;
+    var binary *data;
+    EXEC SQL END DECLARE SECTION;
+    data = malloc(sizeof(void*));
+    *data = 0;
+    ifx_var_flag(data, 0);
+    ifx_var_alloc(data, n+1);
+    ifx_var_setlen(data, n);
+    ifx_var_setdata(data, (char *)buf, n);
+    var->sqltype = CVARBINTYPE;
+    var->sqldata = *data;
+    var->sqllen  = sizeof(void*);
+    *var->sqlind = 0;
+    free( data );
+  }
+  else
+$endif;
+  {
+    loc_t *loc;
+    loc = (loc_t*) malloc(sizeof(loc_t));
+    loc->loc_loctype = LOCMEMORY;
+    loc->loc_buffer = malloc((int)n);
+    loc->loc_bufsize = (int)n;
+    loc->loc_size = (int)n;
+    loc->loc_oflags = 0;
+    loc->loc_mflags = 0;
+    loc->loc_indicator = 0;
+    memcpy(loc->loc_buffer, buf, (int)n);
 
-  var->sqldata = (char *) loc;
-  var->sqllen = sizeof(loc_t);
-  var->sqltype = CLOCATORTYPE;
-  *var->sqlind = 0;
+    var->sqldata = (char *) loc;
+    var->sqllen = sizeof(loc_t);
+    var->sqltype = CLOCATORTYPE;
+    *var->sqlind = 0;
+  }
   return 1;
 }
 
@@ -1638,12 +1684,26 @@ $ifdef HAVE_ESQL9;
           lvarchar **currentlvarcharptr;
           exec sql end declare section;
 
-          var->sqltype = CLVCHARPTRTYPE;
+          if (ISUDTTYPE(var->sqltype)) {
+            /* For opaque types, check if the user wants them in binary
+               format instead. */
+            PyObject *binflag = PyDict_GetItemString(cur->binary_types,
+                                                     var->sqltypename);
+            if (binflag && (PyObject_IsTrue(binflag)==1)) {
+              var->sqltype = CVARBINTYPE;
+            }
+            else {
+              var->sqltype = CLVCHARPTRTYPE;
+            }
+          }
+          else {
+            /* Complex types are always read in text format.*/
+            var->sqltype = CLVCHARPTRTYPE;
+          }
           currentlvarcharptr = malloc(sizeof(void *));
           *currentlvarcharptr = 0;
           ifx_var_flag(currentlvarcharptr,1);
     
-          var->sqlxid = 1;
           var->sqldata = *currentlvarcharptr;
           var->sqllen  = sizeof(void *);
           known_type = 1;
@@ -1992,9 +2052,10 @@ static PyObject *Cursor_executemany(Cursor *self,
   return Py_None;
 }
 
-static PyObject *doCopy(/* const */ void *data,
+static PyObject *doCopy(struct sqlvar_struct *var,
                    int type, int4 xid, int4 sqllen, struct Cursor_t *cur)
 {
+  void *data = var->sqldata;
   switch(type & SQLTYPE){
   case SQLDATE:
   {
@@ -2204,7 +2265,24 @@ $ifdef HAVE_ESQL9;
     PyObject *result;
     Py_ssize_t len = ifx_var_getlen(&data);
     char *lvcharbuf = ifx_var_getdata(&data);
-    result = PyString_FromStringAndSize(lvcharbuf,len-1);
+    if ((var->sqltype&SQLTYPE)==CVARBINTYPE) {
+      /* If the output was bound as var binary, build a buffer object. */
+      char *b_mem;
+      Py_ssize_t b_len;
+      result = PyBuffer_New(len);
+
+      if (PyObject_AsWriteBuffer(result, (void**)&b_mem, &b_len) == -1) {
+        Py_DECREF(result);
+        result = NULL;
+      }
+      else { 
+        memcpy(b_mem, lvcharbuf, (int)b_len);
+      }
+    }
+    else {
+      /* Otherwise build a string. */
+      result = PyString_FromStringAndSize(lvcharbuf,len-1);
+    }
     ifx_var_dealloc(&data);
     return result;
   }
@@ -2241,7 +2319,7 @@ static PyObject *processOutput(Cursor *cur)
       v = Py_None;
       Py_INCREF(v);
     } else {
-      v = doCopy(var->sqldata, cur->originalType[pos], cur->originalXid[pos],
+      v = doCopy(var, cur->originalType[pos], cur->originalXid[pos],
                  cur->originalLen[pos], cur);
     }
 
@@ -2533,6 +2611,7 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   self->rowcount = -1;
   self->arraysize = 1;
   self->messages = PyList_New(0);
+  self->binary_types = PyDict_Copy(conn->binary_types);
   self->errorhandler = conn->errorhandler;
   Py_INCREF(self->errorhandler);
   self->rowformat = CURSOR_ROWFORMAT_TUPLE;
@@ -2826,6 +2905,7 @@ static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
   self->is_open = 0;
   self->messages = PyList_New(0);
   self->errorhandler = Py_None;
+  self->binary_types = PyDict_New();
   Py_INCREF(self->errorhandler);
 
   /* this causes 'DESCRIBE' to describe inputs for update statements in

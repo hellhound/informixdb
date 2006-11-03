@@ -399,9 +399,9 @@ static PyTypeObject Sblob_type = {
   0,                                  /* tp_descr_set */
   0,                                  /* tp_dictoffset */
   (initproc)Sblob_init,                /* tp_init */
-  PyType_GenericAlloc,                /* tp_alloc */
-  PyType_GenericNew,                  /* tp_new */
-  _PyObject_Del                       /* tp_free */
+  DEFERRED_ADDRESS(PyType_GenericAlloc), /* tp_alloc */
+  DEFERRED_ADDRESS(PyType_GenericNew),   /* tp_new */
+  DEFERRED_ADDRESS(_PyObject_Del)        /* tp_free */
 };
 $endif;
 
@@ -699,9 +699,9 @@ static PyTypeObject Cursor_type = {
   0,                                  /* tp_descr_set */
   0,                                  /* tp_dictoffset */
   (initproc)Cursor_init,              /* tp_init */
-  PyType_GenericAlloc,                /* tp_alloc */
-  PyType_GenericNew,                  /* tp_new */
-  _PyObject_Del                       /* tp_free */
+  DEFERRED_ADDRESS(PyType_GenericAlloc), /* tp_alloc */
+  DEFERRED_ADDRESS(PyType_GenericNew),   /* tp_new */
+  DEFERRED_ADDRESS(_PyObject_Del)        /* tp_free */
 };
 
 static void doCloseCursor(Cursor *cur, int doFree);
@@ -959,9 +959,9 @@ static PyTypeObject Connection_type = {
   0,                                  /* tp_descr_set */
   0,                                  /* tp_dictoffset */
   (initproc)Connection_init,          /* tp_init */
-  PyType_GenericAlloc,                /* tp_alloc */
-  PyType_GenericNew,                  /* tp_new */
-  _PyObject_Del                       /* tp_free */
+  DEFERRED_ADDRESS(PyType_GenericAlloc), /* tp_alloc */
+  DEFERRED_ADDRESS(PyType_GenericNew),   /* tp_new */
+  DEFERRED_ADDRESS(_PyObject_Del)        /* tp_free */
 };
 
 static PyObject *dberror_type(PyObject *override);
@@ -3317,9 +3317,9 @@ static PyTypeObject DBAPIType_type = {
   0,                                  /* tp_descr_set */
   0,                                  /* tp_dictoffset */
   (initproc)DBAPIType_init,           /* tp_init */
-  PyType_GenericAlloc,                /* tp_alloc */
-  PyType_GenericNew,                  /* tp_new */
-  _PyObject_Del                       /* tp_free */
+  DEFERRED_ADDRESS(PyType_GenericAlloc), /* tp_alloc */
+  DEFERRED_ADDRESS(PyType_GenericNew),   /* tp_new */
+  DEFERRED_ADDRESS(_PyObject_Del)        /* tp_free */
 };
 
 static PyObject* dbtp_create(char* types[])
@@ -3960,8 +3960,17 @@ void init_informixdb(void)
 #undef defException
 
   Cursor_type.ob_type = &PyType_Type;
+  Cursor_type.tp_alloc = PyType_GenericAlloc;
+  Cursor_type.tp_new = PyType_GenericNew;
+  Cursor_type.tp_free = _PyObject_Del;
   Connection_type.ob_type = &PyType_Type;
+  Connection_type.tp_alloc = PyType_GenericAlloc;
+  Connection_type.tp_new = PyType_GenericNew;
+  Connection_type.tp_free = _PyObject_Del;
   DBAPIType_type.ob_type = &PyType_Type;
+  DBAPIType_type.tp_alloc = PyType_GenericAlloc;
+  DBAPIType_type.tp_new = PyType_GenericNew;
+  DBAPIType_type.tp_free = _PyObject_Del;
 
   Connection_getseters[0].closure = ExcWarning;
   Connection_getseters[1].closure = ExcError;
@@ -3980,6 +3989,9 @@ void init_informixdb(void)
 
 $ifdef HAVE_ESQL9;
   Sblob_type.ob_type = &PyType_Type;
+  Sblob_type.tp_alloc = PyType_GenericAlloc;
+  Sblob_type.tp_new = PyType_GenericNew;
+  Sblob_type.tp_free = _PyObject_Del;
   PyType_Ready(&Sblob_type);
   Py_INCREF(&Sblob_type);
 $endif;

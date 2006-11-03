@@ -1777,11 +1777,12 @@ $endif;
   }
 }
 
-static PyObject *do_prepare(Cursor *self, PyObject *op, const char *sql)
+static PyObject *do_prepare(Cursor *self, PyObject *op)
 {
   struct sqlda *tdaIn = &self->daIn;
   struct sqlda *tdaOut = self->daOut;
   int i;
+  const char *sql=NULL;
   EXEC SQL BEGIN DECLARE SECTION;
   char *queryName = self->queryName;
   char *cursorName = self->cursorName;
@@ -1790,6 +1791,9 @@ static PyObject *do_prepare(Cursor *self, PyObject *op, const char *sql)
 
   clear_messages(self);
   require_cursor_open(self);
+
+  sql = PyString_AsString(op);
+  if (!sql) return NULL;
 
   if (op == self->op) {
     doCloseCursor(self, 0);
@@ -1858,17 +1862,15 @@ static PyObject *do_prepare(Cursor *self, PyObject *op, const char *sql)
 static PyObject *Cursor_prepare(Cursor *self, PyObject *args, PyObject *kwds)
 {
   PyObject *op;
-  const char *sql;
   static char* kwdlist[] = { "operation", 0 };
 
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "s", kwdlist, &sql))
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "O", kwdlist, &op))
     return NULL;
-  op = PyTuple_GET_ITEM(args, 0);
 
   /* Make sure we talk to the right database. */
   if (setConnection(self->conn)) return NULL;
 
-  if (do_prepare(self, op, sql)) {
+  if (do_prepare(self, op)) {
     Py_INCREF(Py_None);
     return Py_None;
   }
@@ -1881,7 +1883,6 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
 {
   struct sqlda *tdaIn = &self->daIn;
   PyObject *op, *inputvars=NULL;
-  const char *sql;
   int i;
   static char* kwdlist[] = { "operation", "parameters", 0 };
   EXEC SQL BEGIN DECLARE SECTION;
@@ -1892,15 +1893,16 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
   clear_messages(self);
   require_cursor_open(self);
 
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|O", kwdlist,
-                                   &sql, &inputvars))
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|O", kwdlist,
+                                   &op, &inputvars))
     return NULL;
-  op = PyTuple_GET_ITEM(args, 0);
-
+  if (op==Py_None)
+    op = self->op;
+  
   /* Make sure we talk to the right database. */
   if (setConnection(self->conn)) return NULL;
 
-  if (!do_prepare(self, op, sql)) {
+  if (!do_prepare(self, op)) {
     return NULL;
   }
 
@@ -1948,7 +1950,6 @@ static PyObject *Cursor_executemany(Cursor *self,
 {
   struct sqlda *tdaIn = &self->daIn;
   PyObject *op, *params, *paramiter, *inputvars = 0;
-  const char *sql;
   int i;
   int rowcount = 0, inputDirty = 0, useInsertCursor;
   static char* kwdlist[] = { "operation", "seq_of_parameters", 0 };
@@ -1960,9 +1961,10 @@ static PyObject *Cursor_executemany(Cursor *self,
   clear_messages(self);
   require_cursor_open(self);
 
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "sO", kwdlist, &sql, &params))
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "OO", kwdlist, &op, &params))
     return NULL;
-  op = PyTuple_GET_ITEM(args, 0);
+  if (op==Py_None)
+    op = self->op;
   paramiter = PyObject_GetIter(params);
   if (paramiter == NULL) {
     return NULL;
@@ -1971,7 +1973,7 @@ static PyObject *Cursor_executemany(Cursor *self,
   /* Make sure we talk to the right database. */
   if (setConnection(self->conn)) return NULL;
 
-  if (!do_prepare(self, op, sql)) {
+  if (!do_prepare(self, op)) {
     return NULL;
   }
   useInsertCursor =

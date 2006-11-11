@@ -1152,10 +1152,10 @@ typedef struct {
   char *out;
   int parmCount;
   int parmIdx;
-  int isParm;
   char state;
   char prev;
   const char *parmName;
+  int parmLen;
 } parseContext;
 
 static void initParseContext(parseContext *ct, const char *c, char *out)
@@ -1167,6 +1167,7 @@ static void initParseContext(parseContext *ct, const char *c, char *out)
   ct->parmIdx = 0;
   ct->prev = '\0';
   ct->parmName = 0;
+  ct->parmLen = 0;
 }
 
 static int doParse(parseContext *ct)
@@ -1176,7 +1177,6 @@ static int doParse(parseContext *ct)
   register char *out = ct->out;
   register char ch;
 
-  ct->isParm = 0;
   while ( (ch = *in++) ) {
     if (ct->state == ch) {
       ct->state = 0;
@@ -1186,10 +1186,9 @@ static int doParse(parseContext *ct)
       } else if (ch == '?') {
         ct->parmIdx = ct->parmCount;
         ct->parmCount++;
-        ct->isParm = 1;
         rc = 1;
         break;
-      } else if ((ch == ':') && !isalnum(ct->prev)) {
+      } else if ((ch == ':') && !isalnum(ct->prev) && ct->prev!=':') {
         const char *m = in;
         int n = 0;
         if (isdigit(*m)) {
@@ -1202,22 +1201,21 @@ static int doParse(parseContext *ct)
             ct->parmIdx = n-1;
             ct->parmCount++;
             in = m;
-            ct->isParm = 1;
             ct->prev = '0';
             rc = 1;
             break;
           }
         }
-        else {
+        if (isalpha(*m) || *m=='_') {
           while (isalnum(*m) || *m=='_') {
             n++; m++;
           }
           if (n) {
-            ct->parmIdx = -n;
+            ct->parmIdx = -1;
             ct->parmName = in;
+            ct->parmLen = n;
             ct->parmCount++;
             in = m;
-            ct->isParm = 1;
             ct->prev = '0';
             rc = 1;
             break;
@@ -1520,7 +1518,7 @@ static int parseSql(Cursor *cur, register char *out, const char *in)
   parseContext ctx;
   int i, n_slots;
   struct sqlvar_struct *var;
-  short *ind;
+  short *ind, have_named=0, have_positional=0;
 
   n_slots = PARM_COUNT_GUESS;
   cur->parmIdx = malloc(PARM_COUNT_GUESS * sizeof(int));
@@ -1528,20 +1526,34 @@ static int parseSql(Cursor *cur, register char *out, const char *in)
   initParseContext(&ctx, in, out);
   while (doParse(&ctx)) {
     if (ctx.parmIdx >= 0) {
+      /* non-negative parmIdx is a positional parameter (? or :<num>) */
       cur->parmIdx[ctx.parmCount-1] = ctx.parmIdx;
+      have_positional = 1;
     }
     else {
+      /* negative parmIdx indicates a named parameter (:<name>), 
+         the name is stored in parmName/parmLen of the parseContext.
+      */
       PyObject *parmname;
-      parmname = PyString_FromStringAndSize(ctx.parmName,-ctx.parmIdx);
+      parmname = PyString_FromStringAndSize(ctx.parmName,ctx.parmLen);
       if (PyList_Append(cur->named_params, parmname)==-1) {
         return 0;
       }
-      cur->parmIdx[ctx.parmCount-1] = -PyList_Size(cur->named_params);
+      cur->parmIdx[ctx.parmCount-1] = ctx.parmCount-1;
+      have_named = 1;
     }
     if (ctx.parmCount == n_slots) {
       n_slots += PARM_COUNT_INCREMENT;
       cur->parmIdx = realloc(cur->parmIdx, n_slots * sizeof(int));
     }
+  }
+
+  if (have_positional && have_named) {
+    PyErr_SetString(PyExc_TypeError,
+       "can't mix named parameters and positional parameters");
+    free(cur->parmIdx);
+    cur->parmIdx = NULL;
+    return 0;
   }
 
   if (ctx.parmCount == 0) {
@@ -1567,35 +1579,37 @@ static int bindInput(Cursor *cur, PyObject *vars)
   int maxp=0;
 
   if (PyList_Size(cur->named_params)) {
+    /* If cur->named_params is not empty, the statement is using named
+       parameters, so the vars must be supplied in a dictionary. 
+       Note that we allow the vars dictionary to contain more keys
+       than the statement needs. This is analogous to string%dict
+       interpolation, and it allows passing locals() as the parameter
+       dictionary.
+    */
     if (vars && !PyDict_Check(vars)) {
       PyErr_SetString(PyExc_TypeError, "SQL parameters are not a dictionary");
       return 0;
     }
     for (i = 0; i < cur->daIn.sqld; ++i) {
-      if (cur->parmIdx[i] >= 0) {
-        PyErr_SetString(PyExc_TypeError,
-           "can't mix named parameters and positional parameters");
-        return 0;
-      }
-      else {
-        int success;
-        PyObject *parmname = PyList_GetItem(cur->named_params,
-                                            -cur->parmIdx[i]-1);
-        PyObject *item = PyDict_GetItem(vars, parmname);
+      int success;
+      /* Look up the i-th parameter name */
+      PyObject *parmname = PyList_GetItem(cur->named_params, cur->parmIdx[i]);
+      /* Get the corresponding value from the dictionary. */
+      PyObject *item = PyDict_GetItem(vars, parmname);
+      if (!item) {
+        /* PyDict_GetItem doesn't set an exception, so we'll raise KeyError. */
+        PyErr_SetObject(PyExc_KeyError, parmname);
         /* PyList_GetItem and PyDict_GetItem borrow the references
            to their result, so no decref necessary here. */
-        if (!item) {
-          /* PyDict_GetItem doesn't set an exception. */
-          PyErr_SetObject(PyExc_KeyError, parmname);
-          return 0;
-        }
-        success = (*ibindFcn(item))(var++, item);
-        if (!success)
-          return 0;
+        return 0;
       }
+      success = (*ibindFcn(item))(var++, item);
+      if (!success)
+        return 0;
     }
   }
   else {
+    /* The statement is using positional parameters */
     if (vars && !PySequence_Check(vars)) {
       PyErr_SetString(PyExc_TypeError, "SQL parameters are not a sequence");
       return 0;

@@ -447,6 +447,7 @@ typedef struct Cursor_t
   PyObject *messages;
   PyObject *errorhandler;
   PyObject *binary_types;
+  PyObject *named_params;
 } Cursor;
 
 static int Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs);
@@ -1080,6 +1081,8 @@ static void Connection_dealloc(Connection *self)
   if (getConnectionName() == self->name)
     setConnectionName(NULL);
 
+  PyDict_Clear(self->binary_types);
+  Py_XDECREF(self->binary_types);
   Py_XDECREF(self->messages);
   Py_XDECREF(self->errorhandler);
 
@@ -1152,6 +1155,7 @@ typedef struct {
   int isParm;
   char state;
   char prev;
+  const char *parmName;
 } parseContext;
 
 static void initParseContext(parseContext *ct, const char *c, char *out)
@@ -1162,6 +1166,7 @@ static void initParseContext(parseContext *ct, const char *c, char *out)
   ct->parmCount = 0;
   ct->parmIdx = 0;
   ct->prev = '\0';
+  ct->parmName = 0;
 }
 
 static int doParse(parseContext *ct)
@@ -1187,19 +1192,36 @@ static int doParse(parseContext *ct)
       } else if ((ch == ':') && !isalnum(ct->prev)) {
         const char *m = in;
         int n = 0;
-        while (isdigit(*m)) {
-          n *= 10;
-          n += *m - '0';
-          m++;
+        if (isdigit(*m)) {
+          while (isdigit(*m)) {
+            n *= 10;
+            n += *m - '0';
+            m++;
+          }
+          if (n) {
+            ct->parmIdx = n-1;
+            ct->parmCount++;
+            in = m;
+            ct->isParm = 1;
+            ct->prev = '0';
+            rc = 1;
+            break;
+          }
         }
-        if (n) {
-          ct->parmIdx = n-1;
-          ct->parmCount++;
-          in = m;
-          ct->isParm = 1;
-          ct->prev = '0';
-          rc = 1;
-          break;
+        else {
+          while (isalnum(*m) || *m=='_') {
+            n++; m++;
+          }
+          if (n) {
+            ct->parmIdx = -n;
+            ct->parmName = in;
+            ct->parmCount++;
+            in = m;
+            ct->isParm = 1;
+            ct->prev = '0';
+            rc = 1;
+            break;
+          }
         }
       }
     }
@@ -1505,7 +1527,17 @@ static int parseSql(Cursor *cur, register char *out, const char *in)
 
   initParseContext(&ctx, in, out);
   while (doParse(&ctx)) {
-    cur->parmIdx[ctx.parmCount-1] = ctx.parmIdx;
+    if (ctx.parmIdx >= 0) {
+      cur->parmIdx[ctx.parmCount-1] = ctx.parmIdx;
+    }
+    else {
+      PyObject *parmname;
+      parmname = PyString_FromStringAndSize(ctx.parmName,-ctx.parmIdx);
+      if (PyList_Append(cur->named_params, parmname)==-1) {
+        return 0;
+      }
+      cur->parmIdx[ctx.parmCount-1] = -PyList_Size(cur->named_params);
+    }
     if (ctx.parmCount == n_slots) {
       n_slots += PARM_COUNT_INCREMENT;
       cur->parmIdx = realloc(cur->parmIdx, n_slots * sizeof(int));
@@ -1534,32 +1566,63 @@ static int bindInput(Cursor *cur, PyObject *vars)
   int i;
   int maxp=0;
 
-  if (vars && !PySequence_Check(vars)) {
-    PyErr_SetString(PyExc_TypeError, "SQL parameters are not a sequence");
-    return 0;
-  }
-
-  for (i = 0; i < cur->daIn.sqld; ++i) {
-    if (cur->parmIdx[i] < n_vars) {
-      int success;
-      PyObject *item = PySequence_GetItem(vars, cur->parmIdx[i]);
-
-      success = (*ibindFcn(item))(var++, item);
-      Py_DECREF(item);  /* PySequence_GetItem increments it */
-      if (!success)
-        return 0;
-      maxp = maxp > cur->parmIdx[i] ? maxp : cur->parmIdx[i];
-    } else {
-      error_handle(cur->conn, cur, ExcInterfaceError,
-                   PyString_FromString("too few actual parameters"));
+  if (PyList_Size(cur->named_params)) {
+    if (vars && !PyDict_Check(vars)) {
+      PyErr_SetString(PyExc_TypeError, "SQL parameters are not a dictionary");
       return 0;
     }
+    for (i = 0; i < cur->daIn.sqld; ++i) {
+      if (cur->parmIdx[i] >= 0) {
+        PyErr_SetString(PyExc_TypeError,
+           "can't mix named parameters and positional parameters");
+        return 0;
+      }
+      else {
+        int success;
+        PyObject *parmname = PyList_GetItem(cur->named_params,
+                                            -cur->parmIdx[i]-1);
+        PyObject *item = PyDict_GetItem(vars, parmname);
+        /* PyList_GetItem and PyDict_GetItem borrow the references
+           to their result, so no decref necessary here. */
+        if (!item) {
+          /* PyDict_GetItem doesn't set an exception. */
+          PyErr_SetObject(PyExc_KeyError, parmname);
+          return 0;
+        }
+        success = (*ibindFcn(item))(var++, item);
+        if (!success)
+          return 0;
+      }
+    }
   }
-
-  if (maxp+1 < n_vars) {
-    error_handle(cur->conn, cur, ExcInterfaceError,
-                 PyString_FromString("too many actual parameters"));
-    return 0;
+  else {
+    if (vars && !PySequence_Check(vars)) {
+      PyErr_SetString(PyExc_TypeError, "SQL parameters are not a sequence");
+      return 0;
+    }
+  
+    for (i = 0; i < cur->daIn.sqld; ++i) {
+      if (cur->parmIdx[i] < n_vars) {
+        int success;
+        PyObject *item = PySequence_GetItem(vars, cur->parmIdx[i]);
+  
+        success = (*ibindFcn(item))(var++, item);
+        Py_DECREF(item);  /* PySequence_GetItem increments it */
+        if (!success)
+          return 0;
+        maxp = maxp > cur->parmIdx[i] ? maxp : cur->parmIdx[i];
+      } else {
+        error_handle(cur->conn, cur, ExcInterfaceError,
+                     PyString_FromString("too few actual parameters"));
+        return 0;
+      }
+    }
+  
+    if (maxp+1 < n_vars) {
+      error_handle(cur->conn, cur, ExcInterfaceError,
+                   PyString_FromString("too many actual parameters"));
+      return 0;
+    }
   }
 
   return 1;
@@ -2427,6 +2490,9 @@ static void deleteInputBinding(Cursor *cur)
     free(cur->parmIdx);
     cur->parmIdx = 0;
   }
+  if (cur->named_params) {
+    PySequence_DelSlice(cur->named_params,0,PyList_Size(cur->named_params));
+  }
 }
 
 static void deleteOutputBinding(Cursor *cur)
@@ -2521,6 +2587,10 @@ static void Cursor_dealloc(Cursor *self)
     deleteInputBinding(self);
     deleteOutputBinding(self);
 
+    PyDict_Clear(self->binary_types);
+    Py_XDECREF(self->binary_types);
+    PySequence_DelSlice(self->named_params,0,PyList_Size(self->named_params));
+    Py_XDECREF(self->named_params);
     Py_XDECREF(self->conn);
     Py_XDECREF(self->messages);
     Py_XDECREF(self->errorhandler);
@@ -2614,6 +2684,7 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   self->arraysize = 1;
   self->messages = PyList_New(0);
   self->binary_types = PyDict_Copy(conn->binary_types);
+  self->named_params = PyList_New(0);
   self->errorhandler = conn->errorhandler;
   Py_INCREF(self->errorhandler);
   self->rowformat = CURSOR_ROWFORMAT_TUPLE;

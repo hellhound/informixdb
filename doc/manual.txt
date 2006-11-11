@@ -129,6 +129,22 @@ except that no placeholders have to be specified::
 
     >>> cursor.callproc('lower', ('FOO',))
 
+`New in version 2.4`: Parameters may also be specified using ``named``
+style, in which case the arguments must be a dictionary whose keys
+correspond to the parameter names::
+
+    >>> cursor.execute('INSERT INTO names VALUES(:first,:last,:age)',
+    ...                dict(first='some', last='body', age=56) )
+
+If a parameter name is not in the dictionary, a KeyError will be raised.
+However, the dictionary may contain more keys than the statement needs.
+This allows, for example, to simply pass ``locals()`` to bind all
+parameters from correspondingly named variables.
+
+Note: While it is perfectly acceptable to execute different statements
+with different parameter styles, mixing parameter styles in the same
+statement is not allowed.
+
 Getting results
 ---------------
 

@@ -483,18 +483,17 @@ PyDoc_STRVAR(Cursor_execute_doc,
 "execute(operation [,parameters])\n\n\
 Execute an arbitrary SQL statement.\n\n\
 'operation' is a string containing the SQL statements with optional\n\
-placeholders, where either qmark-style\n\
-(SELECT * FROM names WHERE name = ?) or numeric-style\n\
-(SELECT * FROM names WHERE name = :1) may be used.\n\
+parameter placeholders, where either qmark, numeric, or named style\n\
+may be used. Parameter styles must not be mixed in one statement.\n\
 \n\
 To execute a previously prepared statement or to re-execute\n\
-a previously executed statement, pass the cursor's 'command'\n\
-attribute as the operation.\n\
+a previously executed statement, pass None or the cursor's\n\
+'command' attribute as the operation.\n\
 \n\
-'parameters' is a sequence of values to be bound to the\n\
-placeholders in the SQL statement. The number of values in the\n\
-sequence must match the number of parameters required by the SQL\n\
-statement exactly. The data types which are used for binding are\n\
+'parameters' is a sequence or dictionary of values to be bound to\n\
+the placeholders in the SQL statement. For sequences, the number\n\
+of values must exactly match the number of parameters required by\n\
+the SQL statement. The data types which are used for binding are\n\
 automatically derived from the Python types. For strings and\n\
 integers this is straightforward. For binding date, time, datetime,\n\
 and binary (BYTE/TEXT) values, the module provides constructors\n\
@@ -506,9 +505,10 @@ Execute an arbitrary SQL statement multiple times using different\n\
 parameters.\n\
 \n\
 The 'operation' parameter is the same as for execute.\n\
-'seq_of_parameters' is a sequence of parameter sequences suitable\n\
-for passing to execute(). The operation will be prepared once and\n\
-then executes for all parameter sequences in 'seq_of_parameters'.\n\
+'seq_of_parameters' is an sequence of parameter sequences or\n\
+dictionaries suitable for passing to execute(). The operation will\n\
+be prepared once and then executes for all parameter sequences or\n\
+dictionaries in 'seq_of_parameters'.\n\
 \n\
 For insert statements, executemany() will use an insert cursor\n\
 if the database supports transactions. This will result in a\n\

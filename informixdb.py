@@ -46,7 +46,7 @@ For more information on DB-API 2.0, see
 http://www.python.org/peps/pep-0249.html
 """
 
-version = "2.3"
+version = "2.4"
 
 class Row(object):
   """Helper class for cursors whose row format is ROW_AS_OBJECT."""

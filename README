@@ -1,7 +1,7 @@
 INTRODUCTION
 ============
 
-This is informixdb 2.3, an Informix implementation of the Python
+This is informixdb 2.4, an Informix implementation of the Python
 Database API.  This release implements version 2.0 of the DB-API:
 
   http://www.python.org/topics/database/DatabaseAPI-2.0.html
@@ -75,6 +75,11 @@ compiler that produced the Python interpreter you're using.
 
 NEWS
 ====
+
+From 2.3 to 2.4:
+- Implement 'named' parameter style to optionally bind query parameters
+  by name
+- Implement option to retrieve opaque types in their binary representation
 
 From 2.2 to 2.3:
 - Allow parameter list for executemany() to be arbitrary iterable objects.
@@ -273,6 +278,7 @@ Release  Date        By
 2.1      2005-11-21  Carsten Haese
 2.2      2006-03-26  Carsten Haese
 2.3      2006-10-01  Carsten Haese
+2.4      TBD         Carsten Haese
 
 --
 Carsten Haese <chaese@users.sourceforge.net>

@@ -490,7 +490,7 @@ To execute a previously prepared statement or to re-execute\n\
 a previously executed statement, pass None or the cursor's\n\
 'command' attribute as the operation.\n\
 \n\
-'parameters' is a sequence or dictionary of values to be bound to\n\
+'parameters' is a sequence or mapping of values to be bound to\n\
 the placeholders in the SQL statement. For sequences, the number\n\
 of values must exactly match the number of parameters required by\n\
 the SQL statement. The data types which are used for binding are\n\
@@ -506,9 +506,9 @@ parameters.\n\
 \n\
 The 'operation' parameter is the same as for execute.\n\
 'seq_of_parameters' is an sequence of parameter sequences or\n\
-dictionaries suitable for passing to execute(). The operation will\n\
+mappings suitable for passing to execute(). The operation will\n\
 be prepared once and then executes for all parameter sequences or\n\
-dictionaries in 'seq_of_parameters'.\n\
+mappings in 'seq_of_parameters'.\n\
 \n\
 For insert statements, executemany() will use an insert cursor\n\
 if the database supports transactions. This will result in a\n\
@@ -1574,20 +1574,18 @@ static int parseSql(Cursor *cur, register char *out, const char *in)
 static int bindInput(Cursor *cur, PyObject *vars)
 {
   struct sqlvar_struct *var = cur->daIn.sqlvar;
-  int n_vars = vars ? (int)PyObject_Length(vars) : 0;
   int i;
-  int maxp=0;
 
   if (PyList_Size(cur->named_params)) {
     /* If cur->named_params is not empty, the statement is using named
-       parameters, so the vars must be supplied in a dictionary. 
-       Note that we allow the vars dictionary to contain more keys
+       parameters, so the vars must be supplied in a mapping. 
+       Note that we allow the vars mapping to contain more keys
        than the statement needs. This is analogous to string%dict
        interpolation, and it allows passing locals() as the parameter
-       dictionary.
+       mapping.
     */
-    if (vars && !PyDict_Check(vars)) {
-      PyErr_SetString(PyExc_TypeError, "SQL parameters are not a dictionary");
+    if (vars && !PyMapping_Check(vars)) {
+      PyErr_SetString(PyExc_TypeError, "SQL parameters are not a mapping");
       return 0;
     }
     for (i = 0; i < cur->daIn.sqld; ++i) {
@@ -1595,20 +1593,21 @@ static int bindInput(Cursor *cur, PyObject *vars)
       /* Look up the i-th parameter name */
       PyObject *parmname = PyList_GetItem(cur->named_params, cur->parmIdx[i]);
       /* Get the corresponding value from the dictionary. */
-      PyObject *item = PyDict_GetItem(vars, parmname);
+      PyObject *item = PyObject_GetItem(vars, parmname);
       if (!item) {
-        /* PyDict_GetItem doesn't set an exception, so we'll raise KeyError. */
-        PyErr_SetObject(PyExc_KeyError, parmname);
-        /* PyList_GetItem and PyDict_GetItem borrow the references
-           to their result, so no decref necessary here. */
+        /* PyList_GetItem borrows the reference to its result, no decref
+           on parmname necessary. */
         return 0;
       }
       success = (*ibindFcn(item))(var++, item);
+      Py_DECREF(item);
       if (!success)
         return 0;
     }
   }
   else {
+    int n_vars = vars ? (int)PyObject_Length(vars) : 0;
+    int maxp=0;
     /* The statement is using positional parameters */
     if (vars && !PySequence_Check(vars)) {
       PyErr_SetString(PyExc_TypeError, "SQL parameters are not a sequence");

@@ -53,6 +53,7 @@ class Row(object):
   def __init__(self, d): self.__dict__.update(d)
   def __repr__(self): return repr(self.__dict__)
   def __str__(self): return str(self.__dict__)
+  def __getitem__(self,k): return self.__dict__[k]
 
 class IntervalYearToMonth(object):
   """\

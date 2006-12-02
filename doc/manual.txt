@@ -4,7 +4,7 @@
 
 :Authors: Daniel Smertnig and Carsten Haese
 :Version: informixdb 2.4
-:Date: TBD
+:Date: 2006-12-02
 :Homepage: `InformixDB on Sourceforge`_
 
 .. contents:: InformixDB
@@ -291,6 +291,10 @@ prepared once and executed twice::
    >>> cursor.prepare("UPDATE names SET age = :2 WHERE first = :1")
    >>> cursor.execute(cursor.command, params1)
    >>> cursor.execute(cursor.command, params2)
+
+`New in version 2.4`: You may pass `None` instead of `cursor.command` to
+execute the previously prepared query. This reduces code clutter if your
+cursor instances have long names.
 
 Using named cursors
 -------------------

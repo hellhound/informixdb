@@ -1587,7 +1587,11 @@ static int bindInput(Cursor *cur, PyObject *vars)
        to string%dict interpolation, and it allows passing locals()
        as the parameter mapping.
     */
-    if (vars && !PyMapping_Check(vars)) {
+    if (!vars) {
+      PyErr_SetString(PyExc_TypeError, "SQL parameters must be supplied");
+      return 0;
+    }
+    if (!PyMapping_Check(vars)) {
       PyErr_SetString(PyExc_TypeError, "SQL parameters are not a mapping");
       return 0;
     }

@@ -1081,7 +1081,9 @@ static void Connection_dealloc(Connection *self)
   if (getConnectionName() == self->name)
     setConnectionName(NULL);
 
-  PyDict_Clear(self->binary_types);
+  if (self->binary_types) {
+    PyDict_Clear(self->binary_types);
+  }
   Py_XDECREF(self->binary_types);
   Py_XDECREF(self->messages);
   Py_XDECREF(self->errorhandler);
@@ -2978,14 +2980,24 @@ static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
   char *dbPass = NULL;
   EXEC SQL END DECLARE SECTION;
   int autocommit = 0;
+  PyObject *pyDbUser = NULL, *pyDbPass = NULL;
 
   static char* kwd_list[] = { "dsn", "user", "password", "autocommit", 0 };
 
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|ssi", kwd_list,
-            &connectionString, &dbUser, &dbPass, &autocommit)) {
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "s|OOi", kwd_list,
+            &connectionString, &pyDbUser, &pyDbPass, &autocommit)) {
     return -1;
   }
 
+  if (pyDbUser && pyDbUser != Py_None) {
+    dbUser = PyString_AsString(pyDbUser);
+    if (!dbUser) return -1;
+  }
+  if (pyDbPass && pyDbPass != Py_None) {
+    dbPass = PyString_AsString(pyDbPass);
+    if (!dbPass) return -1;
+  }
+  
   sprintf(self->name, "CONN%p", self);
   connectionName = self->name;
   self->is_open = 0;

@@ -448,6 +448,7 @@ typedef struct Cursor_t
   PyObject *errorhandler;
   PyObject *binary_types;
   PyObject *named_params;
+  int have_named_params;
 } Cursor;
 
 static int Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs);
@@ -1557,6 +1558,7 @@ static int parseSql(Cursor *cur, register char *out, const char *in)
     cur->parmIdx = NULL;
     return 0;
   }
+  cur->have_named_params = have_named;
 
   if (ctx.parmCount == 0) {
     free(cur->parmIdx);
@@ -1578,13 +1580,12 @@ static int bindInput(Cursor *cur, PyObject *vars)
   struct sqlvar_struct *var = cur->daIn.sqlvar;
   int i;
 
-  if (PyList_Size(cur->named_params)) {
-    /* If cur->named_params is not empty, the statement is using named
-       parameters, so the vars must be supplied in a mapping. 
-       Note that we allow the vars mapping to contain more keys
-       than the statement needs. This is analogous to string%dict
-       interpolation, and it allows passing locals() as the parameter
-       mapping.
+  if (cur->have_named_params) {
+    /* If the statement is using named parameters, the vars must be
+       supplied in a mapping. Note that we allow the vars mapping to
+       contain more keys than the statement needs. This is analogous
+       to string%dict interpolation, and it allows passing locals()
+       as the parameter mapping.
     */
     if (vars && !PyMapping_Check(vars)) {
       PyErr_SetString(PyExc_TypeError, "SQL parameters are not a mapping");
@@ -2700,6 +2701,7 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   self->messages = PyList_New(0);
   self->binary_types = PyDict_Copy(conn->binary_types);
   self->named_params = PyList_New(0);
+  self->have_named_params = 0;
   self->errorhandler = conn->errorhandler;
   Py_INCREF(self->errorhandler);
   self->rowformat = CURSOR_ROWFORMAT_TUPLE;

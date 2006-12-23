@@ -112,6 +112,7 @@ EXEC SQL include sqlda.h;
  * can't use static initializers.
  */
 #define DEFERRED_ADDRESS(ADDR) 0
+#include <signal.h>
 
 /************************* Error handling *************************/
 
@@ -129,9 +130,7 @@ static PyObject *ExcNotSupportedError;
 static PyObject *IntervalY2MType;
 static PyObject *IntervalD2FType;
 static PyObject *DataRowType;
-#if HAVE_DECIMAL == 1
 static PyObject *DecimalType;
-#endif
 
 PyDoc_STRVAR(ExcWarning_doc,
 "Exception class for SQL warnings.\n\n\
@@ -441,14 +440,14 @@ typedef struct Cursor_t
   int is_scroll;
   int pending_scroll;
   int scroll_value;
-#if HAVE_DECIMAL == 1
   int use_decimal;
-#endif
   PyObject *messages;
   PyObject *errorhandler;
   PyObject *binary_types;
   PyObject *named_params;
   int have_named_params;
+  int sqltimeout;
+  int allow_interrupt;
 } Cursor;
 
 static int Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs);
@@ -642,6 +641,10 @@ static PyMemberDef Cursor_members[] = {
     "Last prepared or executed command." },
   { "binary_types", T_OBJECT_EX, offsetof(Cursor, binary_types), READONLY,
     Cursor_binary_types_doc }, 
+  { "sqltimeout", T_INT, offsetof(Cursor, sqltimeout), 0,
+    "SQL query timeout in milliseconds." }, 
+  { "allow_interrupt", T_INT, offsetof(Cursor, allow_interrupt), 0,
+    "Indicates if SIGINT interrupts SQL queries." }, 
   { NULL }
 };
 
@@ -1860,6 +1863,16 @@ $endif;
   }
 }
 
+static void _sqltimeouthandler(mint status)
+{
+  if (status==2) { sqlbreak(); }
+}
+
+static void _sigint_sqlbreak(int sig)
+{
+  sqlbreak();
+}
+
 static PyObject *do_prepare(Cursor *self, PyObject *op)
 {
   struct sqlda *tdaIn = &self->daIn;
@@ -1972,7 +1985,9 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
   char *queryName = self->queryName;
   char *cursorName = self->cursorName;
   EXEC SQL END DECLARE SECTION;
-
+  void (*oldsighandler)(int);
+  
+  oldsighandler = NULL;
   clear_messages(self);
   require_cursor_open(self);
 
@@ -1993,8 +2008,20 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
     return 0;
 
   if (self->has_output) {
+    Py_BEGIN_ALLOW_THREADS;
+    if (self->sqltimeout>0) {
+      sqlbreakcallback(self->sqltimeout, _sqltimeouthandler);
+    }
+    if (self->allow_interrupt) {
+      oldsighandler = signal(2, _sigint_sqlbreak);
+    }
     EXEC SQL OPEN :cursorName USING DESCRIPTOR tdaIn;
+    if (self->allow_interrupt) {
+      signal(2, oldsighandler);
+    }
+    Py_END_ALLOW_THREADS;
     ret_on_dberror_cursor(self, "OPEN");
+    sqlbreakcallback(-1, (void*)NULL);
     self->state = 3;
 
     for (i=0; i<6; i++) self->sqlerrd[i] = sqlca.sqlerrd[i];
@@ -2003,9 +2030,19 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
     return Py_None;
   } else {
     Py_BEGIN_ALLOW_THREADS;
+    if (self->sqltimeout>0) {
+      sqlbreakcallback(self->sqltimeout, _sqltimeouthandler);
+    }
+    if (self->allow_interrupt) {
+      oldsighandler = signal(2, _sigint_sqlbreak);
+    }
     EXEC SQL EXECUTE :queryName USING DESCRIPTOR tdaIn;
+    if (self->allow_interrupt) {
+      signal(2, oldsighandler);
+    }
     Py_END_ALLOW_THREADS;
     ret_on_dberror_cursor(self, "EXECUTE");
+    sqlbreakcallback(-1, (void*)NULL);
 
     for (i=0; i<6; i++) self->sqlerrd[i] = sqlca.sqlerrd[i];
     switch (self->stype) {
@@ -2121,6 +2158,9 @@ static PyObject *Cursor_executemany(Cursor *self,
       }
     }
     Py_DECREF(inputvars);
+    if (PyErr_CheckSignals()) {
+      return NULL;
+    }
   }
   Py_DECREF(paramiter);
   if (useInsertCursor) {
@@ -2274,12 +2314,15 @@ $endif;
     return PyFloat_FromDouble(*(float*)data);
   case SQLDECIMAL:
   case SQLMONEY:
-#if HAVE_DECIMAL == 1
   if (cur->use_decimal) {
     char dbuf[35];
     mint result;
     mint right;
     PyObject *retval = NULL;
+    if (DecimalType==Py_None) {
+      PyErr_SetString(PyExc_ImportError, "can't find decimal.Decimal");
+      return NULL;
+    }
     right = PRECDEC(sqllen);
     if (right==255) right = -1;
     result = dectoasc((dec_t*)data, dbuf, 34, right);
@@ -2292,9 +2335,8 @@ $endif;
       PyErr_SetString(ExcInterfaceError, "Decimal conversion failed.");
     }
     return retval;
-  } else
-#endif
-  {
+  }
+  else {
     double dval;
     dectodbl((dec_t*)data, &dval);
     return PyFloat_FromDouble(dval);
@@ -2654,22 +2696,20 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   int rowformat = CURSOR_ROWFORMAT_TUPLE;
   int is_scroll = 0;
   int is_hold = 0;
-#if HAVE_DECIMAL == 1
   int use_decimal = 1;
+  int sqltimeout = 0;
+  int allow_interrupt = 0;
   static char* kwdlist[] = { "connection", "name", "rowformat",
-                             "scroll", "hold", "use_decimal", 0 };
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|siiii", kwdlist,
+                             "scroll", "hold", "use_decimal",
+                             "sqltimeout", "allow_interrupt", 0 };
+  if (DecimalType==Py_None) { use_decimal = 0; }
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|siiiiii", kwdlist,
         &Connection_type, &conn, &name, &rowformat, &is_scroll, &is_hold,
-        &use_decimal))
+        &use_decimal, &sqltimeout, &allow_interrupt))
     return -1;
   self->use_decimal = (use_decimal)?1:0;
-#else
-  static char* kwdlist[] = { "connection", "name", "rowformat",
-                             "scroll", "hold", 0 };
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|siii", kwdlist,
-        &Connection_type, &conn, &name, &rowformat, &is_scroll, &is_hold))
-    return -1;
-#endif
+  self->sqltimeout = sqltimeout;
+  self->allow_interrupt = allow_interrupt;
 
   Py_INCREF(Py_None);
   self->description = Py_None;
@@ -2741,6 +2781,8 @@ static PyObject *Cursor_fetchone(Cursor *self)
 {
   struct sqlda *tdaOut = self->daOut;
   int i;
+  void (*oldsighandler)(int);
+  oldsighandler = NULL;
 
   EXEC SQL BEGIN DECLARE SECTION;
   char *cursorName;
@@ -2755,6 +2797,12 @@ static PyObject *Cursor_fetchone(Cursor *self)
     return NULL;
 
   Py_BEGIN_ALLOW_THREADS;
+  if (self->sqltimeout>0) {
+    sqlbreakcallback(self->sqltimeout, _sqltimeouthandler);
+  }
+  if (self->allow_interrupt) {
+    oldsighandler = signal(2, _sigint_sqlbreak);
+  }
   if (self->is_scroll) {
     exec sql begin declare section;
     int scroll_val;
@@ -2777,6 +2825,9 @@ static PyObject *Cursor_fetchone(Cursor *self)
   else {
     EXEC SQL FETCH :cursorName USING DESCRIPTOR tdaOut;
   }
+  if (self->allow_interrupt) {
+    signal(2, oldsighandler);
+  }
   Py_END_ALLOW_THREADS;
   for (i=0; i<6; i++)
     self->sqlerrd[i] = sqlca.sqlerrd[i];
@@ -2786,6 +2837,7 @@ static PyObject *Cursor_fetchone(Cursor *self)
   } else if (strncmp(SQLSTATE, "00", 2)) {
     ret_on_dberror_cursor(self, "FETCH");
   }
+  sqlbreakcallback(-1,(void*)NULL);
   return processOutput(self);
 }
 
@@ -2795,7 +2847,7 @@ static PyObject *fetchCounted(Cursor *self, int count)
 
   require_cursor_open(self);
 
-  while ( count-- > 0 )
+  while ( count==-1 || count-- > 0 )
   {
       PyObject *entry = Cursor_fetchone(self);
 
@@ -2818,6 +2870,10 @@ static PyObject *fetchCounted(Cursor *self, int count)
       }
 
       Py_DECREF(entry);
+
+      if (PyErr_CheckSignals()) {
+        return NULL;
+      }
   }
 
   return list;
@@ -2832,12 +2888,17 @@ static PyObject *Cursor_fetchmany(Cursor *self, PyObject *args, PyObject *kwds)
   if (!PyArg_ParseTupleAndKeywords(args, kwds, "|i", kwdnames, &n_rows))
       return NULL;
 
-  return fetchCounted(self, n_rows);
+  if (n_rows<1) {
+    return PyList_New(0);
+  }
+  else {
+    return fetchCounted(self, n_rows);
+  }
 }
 
 static PyObject *Cursor_fetchall(Cursor *self)
 {
-  return fetchCounted(self, INT_MAX);
+  return fetchCounted(self, -1);
 }
 
 static PyObject* Cursor_scroll(Cursor *self, PyObject *args, PyObject *kwds)
@@ -4171,7 +4232,6 @@ $endif;
 
   PyDateTime_IMPORT;
 
-#if HAVE_DECIMAL
   DecimalType = NULL;
   module = PyImport_ImportModule("decimal");
   if (module) {
@@ -4182,10 +4242,9 @@ $endif;
   }
   if (!DecimalType) {
     DecimalType = Py_None;
-    PyErr_SetString(PyExc_ImportError, "can't find decimal.Decimal");
+    PyErr_Clear();
   }
   Py_INCREF(DecimalType);
-#endif
 
 #ifndef _WIN32
   /* when using a connection mode with forking (i.e. Informix SE)

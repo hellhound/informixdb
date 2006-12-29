@@ -2570,7 +2570,7 @@ static void deleteOutputBinding(Cursor *cur)
           _loc_free(loc->loc_buffer);
       }
 $ifdef HAVE_ESQL9;
-      if (ISSMARTBLOB(da->sqlvar[i].sqltype,da->sqlvar[i].sqlxid)) {
+      if (ISSMARTBLOB(cur->originalType[i],cur->originalXid[i])) {
         free(da->sqlvar[i].sqldata);
       }
 $endif;

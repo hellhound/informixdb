@@ -70,9 +70,8 @@ class build_ext(_build_ext):
             matchgroups = matchobj.groups()
             esqlversion = int(matchgroups[1] + matchgroups[2])
             if matchgroups[0]=="IBM":
-              # IBM Informix CSDK 2.90 reports the ESQL version as 2.90
-              # even though it's ESQL 9.xx 
-              if esqlversion == 290: esqlversion = 960
+              # Assume ESQL 9.xx for any IBM branded CSDK.
+              esqlversion = 960
         if esqlversion==None:
           esqlversion = 850
         if esqlversion >= 900:

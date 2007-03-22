@@ -2193,6 +2193,12 @@ static PyObject *doCopy(struct sqlvar_struct *var,
     int i, pos;
     int year=1,month=1,day=1,hour=0,minute=0,second=0,usec=0;
     dtime_t* dt = (dtime_t*)data;
+    exec sql begin declare section;
+    datetime year to fraction(5) dt_extended;
+    exec sql end declare section;
+
+    dtextend(dt, &dt_extended);    
+    dt = &dt_extended;
     for (pos = 0, i = TU_START(dt->dt_qual);
          i <= TU_END(dt->dt_qual) && pos < dt->dt_dec.dec_ndgts;
          ++i) {

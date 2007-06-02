@@ -1189,6 +1189,10 @@ static int doParse(parseContext *ct)
     } else if (ct->state == 0){
       if ((ch == '\'') || (ch == '"')) {
         ct->state = ch;
+      } else if (ch == '-' && ct->prev=='-') {
+        ct->state = '\n'; 
+      } else if (ch == '{') {
+        ct->state = '}'; 
       } else if (ch == '?') {
         ct->parmIdx = ct->parmCount;
         ct->parmCount++;

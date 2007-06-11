@@ -2004,6 +2004,14 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
   /* Make sure we talk to the right database. */
   if (setConnection(self->conn)) return NULL;
 
+  /* If an insert statement was used by an insert cursor, it must be
+     reprepared for single execution */
+  if (self->op==op && self->stype==SQ_INSERT && self->state > 1) {
+      Py_DECREF(self->op);
+      self->op = Py_None;
+      Py_INCREF(Py_None);
+  }
+
   if (!do_prepare(self, op)) {
     return NULL;
   }

@@ -2204,16 +2204,27 @@ static PyObject *doCopy(struct sqlvar_struct *var,
   {
     int i, pos;
     int year=1,month=1,day=1,hour=0,minute=0,second=0,usec=0;
-    dtime_t* dt = (dtime_t*)data;
+    dtime_t* dt = (dtime_t*)data, *origdt;
     exec sql begin declare section;
     datetime year to fraction(5) dt_extended;
     exec sql end declare section;
 
+    origdt = dt;
     dtextend(dt, &dt_extended);    
     dt = &dt_extended;
+
     for (pos = 0, i = TU_START(dt->dt_qual);
          i <= TU_END(dt->dt_qual) && pos < dt->dt_dec.dec_ndgts;
          ++i) {
+      if (i<TU_START(origdt->dt_qual)||i>TU_END(origdt->dt_qual)) {
+        switch (i) {
+        case TU_YEAR: pos++;
+        case TU_MONTH: case TU_DAY: case TU_HOUR:
+        case TU_MINUTE: case TU_SECOND: case TU_F1: case TU_F3:
+        case TU_F5: pos++;
+        }
+        continue;
+      }
       switch (i) {
       case TU_YEAR:
         year = dt->dt_dec.dec_dgts[pos++]*100;

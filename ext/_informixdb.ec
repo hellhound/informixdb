@@ -1311,7 +1311,7 @@ static int ibindDateTime(struct sqlvar_struct *var, PyObject *datetime)
 
   dt = (dtime_t*)malloc(sizeof(dtime_t));
   dt->dt_qual = TU_DTENCODE(TU_YEAR, TU_F5);
-  snprintf(buf, sizeof(buf), "%d-%d-%d %d:%d:%d.%d", year, month, day,
+  snprintf(buf, sizeof(buf), "%d-%d-%d %d:%d:%d.%05d", year, month, day,
            hour, minute, second, usec/10);
   if ((ret = dtcvasc(buf, dt)) != 0) {
     PyErr_Format(ExcInterfaceError, "Failed to parse datetime value (%s). "

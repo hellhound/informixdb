@@ -1955,7 +1955,7 @@ static PyObject *do_prepare(Cursor *self, PyObject *op)
   self->op = op;
   Py_INCREF(op);
 
-  // No INCREF because the callers don't DECREF.
+  /* No INCREF because the callers don't DECREF. */
   return Py_None;
 }
 

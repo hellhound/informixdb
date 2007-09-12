@@ -2591,7 +2591,7 @@ static void deleteOutputBinding(Cursor *cur)
   struct sqlda *da = cur->daOut;
   if (da && da->sqlvar) {
     int i;
-    for (i=0; i<da->sqld; i++)
+    for (i=0; i<da->sqld; i++) {
       if (da->sqlvar[i].sqldata &&
           (da->sqlvar[i].sqltype == CLOCATORTYPE)) {
         loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
@@ -2603,6 +2603,7 @@ $ifdef HAVE_ESQL9;
         free(da->sqlvar[i].sqldata);
       }
 $endif;
+    }
     _da_free(cur->daOut);
     cur->daOut = 0;
   }

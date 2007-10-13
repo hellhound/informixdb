@@ -1933,7 +1933,7 @@ static PyObject *do_prepare(Cursor *self, PyObject *op)
 
   if (self->has_output) {
     if (self->conn->can_describe_input) {
-      struct sqlda *tda;
+      struct sqlda *tda = NULL;
       EXEC SQL DESCRIBE INPUT :queryName INTO tda;
       ret_on_dberror_cursor(self, "DESCRIBE INPUT");
       if (tda) {

@@ -726,6 +726,9 @@ typedef struct Connection_t
   PyObject *errorhandler;
   int autocommit;
   PyObject *binary_types;
+  PyObject *dbms_name;
+  PyObject *dbms_version;
+  int can_describe_input;
 } Connection;
 
 static int setConnection(Connection*);
@@ -874,6 +877,10 @@ static PyMemberDef Connection_members[] = {
     Connection_errorhandler_doc },
   { "binary_types", T_OBJECT_EX, offsetof(Connection, binary_types), READONLY,
     Connection_binary_types_doc },
+  { "dbms_name", T_OBJECT_EX, offsetof(Connection, dbms_name), READONLY,
+    "Name of the database engine." }, 
+  { "dbms_version", T_OBJECT_EX, offsetof(Connection, dbms_version), READONLY,
+    "Version of the database engine." }, 
   { NULL }
 };
 
@@ -1925,6 +1932,15 @@ static PyObject *do_prepare(Cursor *self, PyObject *op)
     (self->stype == 0 || (self->stype == SQ_EXECPROC && tdaOut->sqld > 0) );
 
   if (self->has_output) {
+    if (self->conn->can_describe_input) {
+      struct sqlda *tda;
+      EXEC SQL DESCRIBE INPUT :queryName INTO tda;
+      ret_on_dberror_cursor(self, "DESCRIBE INPUT");
+      if (tda) {
+        copyDescr(tdaIn, tda);
+        _da_free(tda);
+      }
+    }
     bindOutput(self);
     switch (self->is_hold + 2*self->is_scroll) {
       case 3:
@@ -2189,6 +2205,14 @@ static PyObject *Cursor_executemany(Cursor *self,
   return Py_None;
 }
 
+static void _clip_char(char *s)
+{
+    /* clip trailing spaces */
+    register size_t len = strlen(s);
+    register size_t clipped_len = byleng(s, len);
+    s[clipped_len] = 0;
+}
+
 static PyObject *doCopy(struct sqlvar_struct *var,
                    int type, int4 xid, int4 sqllen, struct Cursor_t *cur)
 {
@@ -2331,10 +2355,7 @@ $ifdef HAVE_ESQL9;
   case SQLLVARCHAR:
 $endif;
   {
-      /* clip trailing spaces */
-      register size_t len = strlen((char*)data);
-      register size_t clipped_len = byleng(data, len);
-      ((char*)data)[clipped_len] = 0;
+      _clip_char((char*)data);
       return Py_BuildValue("s", (char*)data);
   }
   case SQLFLOAT:
@@ -2447,9 +2468,7 @@ $endif;
     /* Unknown type. bindOutput falls back to binding to a character string.
        If Informix actually managed to read this unknown type into that string,
        we might as well return it instead of returning None. */
-    register size_t len = strlen((char*)data);
-    register size_t clipped_len = byleng(data, len);
-    ((char*)data)[clipped_len] = 0;
+    _clip_char((char*)data);
     return Py_BuildValue("s", (char*)data);
   }
 }
@@ -3075,8 +3094,16 @@ static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
   char *connectionString = NULL;
   char *dbUser = NULL;
   char *dbPass = NULL;
+  char server_type[128];
+  char ver_major[16];
+  char ver_minor[16];
+  char ver_os[16];
+  char ver_level[16];
+  char version[256];
   EXEC SQL END DECLARE SECTION;
   int autocommit = 0;
+  int iVerMajor = 0;
+  int iVerMinor = 0;
   PyObject *pyDbUser = NULL, *pyDbPass = NULL;
 
   static char* kwd_list[] = { "dsn", "user", "password", "autocommit", 0 };
@@ -3120,6 +3147,7 @@ static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
   }
 
   self->is_open = 1;
+  self->can_describe_input = 0;
   self->has_commit = (sqlca.sqlwarn.sqlwarn1 == 'W');
   self->autocommit = 0;
   if (autocommit) self->autocommit = 1;
@@ -3132,6 +3160,41 @@ static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
   }
 
   setConnectionName(self->name);
+
+  EXEC SQL
+    SELECT dbinfo("version","server-type"),
+           dbinfo("version","major"),
+           dbinfo("version","minor"),
+           dbinfo("version","os"),
+           dbinfo("version","level")
+      INTO :server_type, :ver_major, :ver_minor, :ver_os, :ver_level
+      FROM systables where tabid=1 ;
+
+  if (SQLCODE==0) {
+    _clip_char(server_type);
+    _clip_char(ver_major);
+    _clip_char(ver_minor);
+    _clip_char(ver_os);
+    _clip_char(ver_level);
+    sprintf(version, "%s.%s%s%s", ver_major, ver_minor, ver_os, ver_level);
+    self->dbms_name = PyString_FromString(server_type);
+    self->dbms_version = PyString_FromString(version);
+
+    iVerMajor = atoi(ver_major);
+    iVerMinor = atoi(ver_minor);
+    if (iVerMajor*100+iVerMinor >= 940) {
+      self->can_describe_input = 1;
+    }
+  }
+  else {
+    EXEC SQL
+      SELECT owner
+        INTO :version
+        FROM systables where tabname = " VERSION";
+    _clip_char(version);
+    self->dbms_name = PyString_FromString("Unknown");
+    self->dbms_version = PyString_FromString(version);
+  }
 
   return 0;
 }

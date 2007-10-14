@@ -113,6 +113,7 @@ EXEC SQL include sqlda.h;
  */
 #define DEFERRED_ADDRESS(ADDR) 0
 #include <signal.h>
+#include "esqlver.h"
 
 /************************* Error handling *************************/
 
@@ -728,6 +729,8 @@ typedef struct Connection_t
   PyObject *binary_types;
   PyObject *dbms_name;
   PyObject *dbms_version;
+  PyObject *driver_name;
+  PyObject *driver_version;
   int can_describe_input;
 } Connection;
 
@@ -881,6 +884,10 @@ static PyMemberDef Connection_members[] = {
     "Name of the database engine." }, 
   { "dbms_version", T_OBJECT_EX, offsetof(Connection, dbms_version), READONLY,
     "Version of the database engine." }, 
+  { "driver_name", T_OBJECT_EX, offsetof(Connection, driver_name), READONLY,
+    "Name of the client driver." }, 
+  { "driver_version", T_OBJECT_EX, offsetof(Connection, driver_version), READONLY,
+    "Version of the client driver." }, 
   { NULL }
 };
 
@@ -3195,6 +3202,8 @@ static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
     self->dbms_name = PyString_FromString("Unknown");
     self->dbms_version = PyString_FromString(version);
   }
+  self->driver_name = PyString_FromString(DRIVER_NAME);
+  self->driver_version = PyString_FromString(DRIVER_VERSION);
 
   return 0;
 }

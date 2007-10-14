@@ -61,21 +61,31 @@ class build_ext(_build_ext):
             self.esql_parts.append('-static')
 
         # determine esql version
-        esqlver = re.compile(r"(IBM)?.*ESQL Version (\d+)\.(\d+)")
+        driver_name = "INFORMIX-ESQL"
+        driver_version = "Unknown"
+        esqlver = re.compile(r"(IBM)?.*ESQL Version ((\d+)\.(\d+)[^ ]*)")
         cout = os.popen(' '.join(self.esql_parts[0:1] + [ '-V' ]),'r')
         esqlversion = None
         for line in cout:
           matchobj = esqlver.match(line)
           if matchobj:
             matchgroups = matchobj.groups()
-            esqlversion = int(matchgroups[1] + matchgroups[2])
+            driver_version = matchgroups[1].strip()
+            esqlversion = int(matchgroups[2] + matchgroups[3])
             if matchgroups[0]=="IBM":
               # Assume ESQL 9.xx for any IBM branded CSDK.
+              driver_name = "IBM Informix-ESQL"
               esqlversion = 960
         if esqlversion==None:
           esqlversion = 850
         if esqlversion >= 900:
           self.esql_parts.append("-EDHAVE_ESQL9")
+        f = open(os.path.join("ext","esqlver.h"), "w")
+        f.write("""\
+#define DRIVER_NAME "%(driver_name)s"
+#define DRIVER_VERSION "%(driver_version)s"
+""" % locals())
+        f.close()
 
         # find esql libs/objects
         cout = os.popen(' '.join(self.esql_parts + [ '-libs' ]),'r')

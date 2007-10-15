@@ -1939,6 +1939,7 @@ static PyObject *do_prepare(Cursor *self, PyObject *op)
     (self->stype == 0 || (self->stype == SQ_EXECPROC && tdaOut->sqld > 0) );
 
   if (self->has_output) {
+$ifdef HAVE_DESCRIBE_INPUT;
     if (self->conn->can_describe_input) {
       struct sqlda *tda = NULL;
       EXEC SQL DESCRIBE INPUT :queryName INTO tda;
@@ -1948,6 +1949,7 @@ static PyObject *do_prepare(Cursor *self, PyObject *op)
         _da_free(tda);
       }
     }
+$endif;
     bindOutput(self);
     switch (self->is_hold + 2*self->is_scroll) {
       case 3:

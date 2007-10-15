@@ -80,6 +80,8 @@ class build_ext(_build_ext):
           esqlversion = 850
         if esqlversion >= 900:
           self.esql_parts.append("-EDHAVE_ESQL9")
+        if esqlversion >= 940:
+          self.esql_parts.append("-EDHAVE_DESCRIBE_INPUT")
         f = open(os.path.join("ext","esqlver.h"), "w")
         f.write("""\
 #define DRIVER_NAME "%(driver_name)s"

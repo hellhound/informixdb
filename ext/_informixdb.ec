@@ -4309,7 +4309,9 @@ $ifdef HAVE_ESQL9;
   ExposeIntConstant(LO_ATTR_NOKEEP_LASTACCESS_TIME);
   ExposeIntConstant(LO_ATTR_HIGH_INTEG);
   ExposeIntConstant(LO_ATTR_MODERATE_INTEG);
+#ifdef LO_ATTR_TEMP
   ExposeIntConstant(LO_ATTR_TEMP);
+#endif
   ExposeIntConstant(LO_SEEK_SET);
   ExposeIntConstant(LO_SEEK_CUR);
   ExposeIntConstant(LO_SEEK_END);

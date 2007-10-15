@@ -115,6 +115,30 @@ EXEC SQL include sqlda.h;
 #include <signal.h>
 #include "esqlver.h"
 
+/************************* Helpers *************************/
+static PyObject *get_bool_from_int(PyObject *self, void *closure)
+{
+  int *p;
+
+  p = (int*)((char*)self+(int)closure);
+  if (*p) {
+    Py_INCREF(Py_True);
+    return Py_True;
+  }
+  else {
+    Py_INCREF(Py_False);
+    return Py_False;
+  }
+}
+
+static int set_bool_to_int(PyObject *self, PyObject *value, void *closure)
+{
+  int *p;
+  p = (int*)((char*)self+(int)closure);
+  *p = PyObject_IsTrue(value)?1:0;
+  return 0;
+}
+
 /************************* Error handling *************************/
 
 static PyObject *ExcWarning;
@@ -448,7 +472,7 @@ typedef struct Cursor_t
   PyObject *named_params;
   int have_named_params;
   int sqltimeout;
-  int allow_interrupt;
+  int sqlinterrupt;
 } Cursor;
 
 static int Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs);
@@ -644,14 +668,15 @@ static PyMemberDef Cursor_members[] = {
     Cursor_binary_types_doc }, 
   { "sqltimeout", T_INT, offsetof(Cursor, sqltimeout), 0,
     "SQL query timeout in milliseconds." }, 
-  { "allow_interrupt", T_INT, offsetof(Cursor, allow_interrupt), 0,
-    "Indicates if SIGINT interrupts SQL queries." }, 
   { NULL }
 };
 
 static PyGetSetDef Cursor_getseters[] = {
   { "sqlerrd", (getter)Cursor_getsqlerrd, NULL,
     "Informix SQL error descriptor as tuple", NULL },
+  { "sqlinterrupt", (getter)get_bool_from_int, (setter)set_bool_to_int,
+    "If True, SIGINT interrupts SQL queries.",
+    (void*)offsetof(Cursor, sqlinterrupt) },
   { NULL }
 };
 
@@ -732,6 +757,8 @@ typedef struct Connection_t
   PyObject *driver_name;
   PyObject *driver_version;
   int can_describe_input;
+  int sqltimeout;
+  int sqlinterrupt;
 } Connection;
 
 static int setConnection(Connection*);
@@ -888,6 +915,8 @@ static PyMemberDef Connection_members[] = {
     "Name of the client driver." }, 
   { "driver_version", T_OBJECT_EX, offsetof(Connection, driver_version), READONLY,
     "Version of the client driver." }, 
+  { "sqltimeout", T_INT, offsetof(Connection, sqltimeout), 0,
+    "Default SQL query timeout in milliseconds." }, 
   { NULL }
 };
 
@@ -926,6 +955,9 @@ static PyGetSetDef Connection_getseters[] = {
     ExcNotSupportedError_doc, DEFERRED_ADDRESS(ExcNotSupportedError) },
   { "autocommit", (getter)Connection_getautocommit,
     (setter)Connection_setautocommit, Connection_autocommit_doc, NULL },
+  { "sqlinterrupt", (getter)get_bool_from_int, (setter)set_bool_to_int,
+    "Default setting for whether SIGINT interrupts SQL queries.",
+    (void*)offsetof(Connection, sqlinterrupt) },
   { NULL }
 };
 
@@ -2049,11 +2081,11 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
     if (self->sqltimeout>0) {
       sqlbreakcallback(self->sqltimeout, _sqltimeouthandler);
     }
-    if (self->allow_interrupt) {
+    if (self->sqlinterrupt) {
       oldsighandler = signal(2, _sigint_sqlbreak);
     }
     EXEC SQL OPEN :cursorName USING DESCRIPTOR tdaIn;
-    if (self->allow_interrupt) {
+    if (self->sqlinterrupt) {
       signal(2, oldsighandler);
     }
     Py_END_ALLOW_THREADS;
@@ -2070,11 +2102,11 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
     if (self->sqltimeout>0) {
       sqlbreakcallback(self->sqltimeout, _sqltimeouthandler);
     }
-    if (self->allow_interrupt) {
+    if (self->sqlinterrupt) {
       oldsighandler = signal(2, _sigint_sqlbreak);
     }
     EXEC SQL EXECUTE :queryName USING DESCRIPTOR tdaIn;
-    if (self->allow_interrupt) {
+    if (self->sqlinterrupt) {
       signal(2, oldsighandler);
     }
     Py_END_ALLOW_THREADS;
@@ -2755,24 +2787,21 @@ Cursor_init(Cursor *self, PyObject *args, PyObject *kwargs)
   int is_scroll = 0;
   int is_hold = 0;
   int use_decimal = 1;
-  int sqltimeout = 0;
-  int allow_interrupt = 0;
   static char* kwdlist[] = { "connection", "name", "rowformat",
-                             "scroll", "hold", "use_decimal",
-                             "sqltimeout", "allow_interrupt", 0 };
+                             "scroll", "hold", "use_decimal", 0 };
   if (DecimalType==Py_None) { use_decimal = 0; }
-  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|siiiiii", kwdlist,
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, "O!|siiii", kwdlist,
         &Connection_type, &conn, &name, &rowformat, &is_scroll, &is_hold,
-        &use_decimal, &sqltimeout, &allow_interrupt))
+        &use_decimal))
     return -1;
   self->use_decimal = (use_decimal)?1:0;
-  self->sqltimeout = sqltimeout;
-  self->allow_interrupt = allow_interrupt;
 
   Py_INCREF(Py_None);
   self->description = Py_None;
   self->conn = conn;
   Py_INCREF(conn);
+  self->sqltimeout = conn->sqltimeout;
+  self->sqlinterrupt = conn->sqlinterrupt;
   self->state = 0;
   self->daIn.sqld = 0; self->daIn.sqlvar = 0;
   self->daOut = 0;
@@ -2857,7 +2886,7 @@ static PyObject *Cursor_fetchone(Cursor *self)
   if (self->sqltimeout>0) {
     sqlbreakcallback(self->sqltimeout, _sqltimeouthandler);
   }
-  if (self->allow_interrupt) {
+  if (self->sqlinterrupt) {
     oldsighandler = signal(2, _sigint_sqlbreak);
   }
   if (self->is_scroll) {
@@ -2882,7 +2911,7 @@ static PyObject *Cursor_fetchone(Cursor *self)
   else {
     EXEC SQL FETCH :cursorName USING DESCRIPTOR tdaOut;
   }
-  if (self->allow_interrupt) {
+  if (self->sqlinterrupt) {
     signal(2, oldsighandler);
   }
   Py_END_ALLOW_THREADS;

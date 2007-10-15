@@ -243,7 +243,9 @@ See also `old/README' for other NOTES.
 FUTURE
 ======
 
-- Nothing planned at the moment. Let me know if you think a feature is missing.
+- Some kind of Type Mapping API
+- Some kind of Unicode support
+- More unit tests to cover correct functionality in addition to API compliance
 
 MAINTAINER
 ==========

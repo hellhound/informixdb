@@ -2840,12 +2840,11 @@ static PyObject *Cursor_fetchone(Cursor *self)
   struct sqlda *tdaOut = self->daOut;
   int i;
   void (*oldsighandler)(int);
-  oldsighandler = NULL;
-
   EXEC SQL BEGIN DECLARE SECTION;
   char *cursorName;
   EXEC SQL END DECLARE SECTION;
 
+  oldsighandler = NULL;
   cursorName = self->cursorName;
 
   require_cursor_open(self);

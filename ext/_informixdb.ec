@@ -115,6 +115,8 @@ EXEC SQL include sqlda.h;
 #include <signal.h>
 #include "esqlver.h"
 
+typedef void sqlbreakcallbackfunc(mint);
+
 /************************* Helpers *************************/
 static PyObject *get_bool_from_int(PyObject *self, void *closure)
 {
@@ -2090,7 +2092,7 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
     }
     Py_END_ALLOW_THREADS;
     ret_on_dberror_cursor(self, "OPEN");
-    sqlbreakcallback(-1, (void*)NULL);
+    sqlbreakcallback(-1, (sqlbreakcallbackfunc*)NULL);
     self->state = 3;
 
     for (i=0; i<6; i++) self->sqlerrd[i] = sqlca.sqlerrd[i];
@@ -2111,7 +2113,7 @@ static PyObject *Cursor_execute(Cursor *self, PyObject *args, PyObject *kwds)
     }
     Py_END_ALLOW_THREADS;
     ret_on_dberror_cursor(self, "EXECUTE");
-    sqlbreakcallback(-1, (void*)NULL);
+    sqlbreakcallback(-1, (sqlbreakcallbackfunc*)NULL);
 
     for (i=0; i<6; i++) self->sqlerrd[i] = sqlca.sqlerrd[i];
     switch (self->stype) {
@@ -2923,7 +2925,7 @@ static PyObject *Cursor_fetchone(Cursor *self)
   } else if (strncmp(SQLSTATE, "00", 2)) {
     ret_on_dberror_cursor(self, "FETCH");
   }
-  sqlbreakcallback(-1,(void*)NULL);
+  sqlbreakcallback(-1,(sqlbreakcallbackfunc*)NULL);
   return processOutput(self);
 }
 

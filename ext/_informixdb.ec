@@ -3189,6 +3189,8 @@ static int Connection_init(Connection *self, PyObject *args, PyObject* kwds)
   self->can_describe_input = 0;
   self->has_commit = (sqlca.sqlwarn.sqlwarn1 == 'W');
   self->autocommit = 0;
+  self->sqltimeout = 0;
+  self->sqlinterrupt = 0;
   if (autocommit) self->autocommit = 1;
 
   if (self->has_commit && !self->autocommit) {

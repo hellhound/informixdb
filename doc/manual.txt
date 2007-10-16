@@ -3,8 +3,8 @@
 ==========================
 
 :Authors: Daniel Smertnig and Carsten Haese
-:Version: informixdb 2.4
-:Date: 2006-12-02
+:Version: informixdb 2.5
+:Date: 2007-10-16
 :Homepage: `InformixDB on Sourceforge`_
 
 .. contents:: InformixDB
@@ -379,6 +379,27 @@ is the result row number to which you want to scroll. In relative mode,
 `value` is the number of rows by which you want to scroll from the current
 row.
 
+Interrupting Queries
+--------------------
+`(new in version 2.5)`
+
+Cursor objects provide two mechanisms for interrupting long-running queries,
+configurable with the attributes ``sqltimeout`` and ``sqlinterrupt``.
+``sqltimeout`` is an integer that specifies how many milliseconds a query is
+allowed to take.  If a query takes longer than that, it is automatically
+aborted.  If ``sqltimeout`` is zero, no timeout is in effect and queries are
+allowed to run indefinitely.
+
+``sqlinterrupt`` is a boolean attribute that indicates whether interrupt
+signals during query execution interrupt the query. Note that turning this
+feature on disables Python's handling of interrupt signals while queries are
+executed.
+
+Connection objects have ``sqltimeout`` and ``sqlinterrupt`` attributes that
+set the defaults for the corresponding attributes of any cursor objects
+that the connection object creates. By default, ``sqltimeout`` is zero,
+and ``sqlinterrupt`` is False.
+
 Transactions
 ============
 
@@ -643,6 +664,32 @@ of a `Connection` or `Cursor` method):
   `Connection` object's messages attribute, and if the error is an actual
   error (i.e. not of type `Warning`), an exception is raised. 
 
+Inspecting Version Numbers
+==========================
+
+Occasionally it may be useful to inspect the version numbers of the database
+engine, the ESQL/C driver, or of InformixDB itself. The following version
+information is available at runtime:
+
+Module-level attribute:
+
+  * ``version``: The version number of InformixDB itself.
+    (`new in version 2.3`)
+
+Versions 2.0 through 2.2 didn't provide any version information. If you
+have an installation of InformixDB that doesn't have a ``version`` attribute,
+you should probably upgrade, since you're missing out on a lot of features
+and bug fixes.
+
+Connection attributes (`new in version 2.5`):
+
+  * ``dbms_name``, ``dbms_version``: The name and version number of the
+    database engine. For older engines such as Standard Engine, the name can
+    not be determined and the string "Unknown" is returned instead.
+
+  * ``driver_name``, ``driver_version``: The name and version number of the
+    ESQL/C installation with which InformixDB was compiled. The name is either
+    "INFORMIX-ESQL" or "IBM Informix-ESQL"
 
 
 .. _InformixDB on Sourceforge: http://informixdb.sourceforge.net/

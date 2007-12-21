@@ -102,8 +102,14 @@ class build_ext(_build_ext):
           esql_config.append(token)
         ret = cout.close()
         if ret != None:
-          raise DistutilsSetupError, \
-                "\nCan't find esql. Please set INFORMIXDIR correctly."
+          raise DistutilsSetupError, """\
+Can't run esql. Please make sure that:
+* You have the Informix CSDK installed,
+* INFORMIXDIR is set to where Informix CSDK is installed, and
+* esql is in your PATH.
+
+See the README for build requirements.
+"""
 
         if get_platform()=="win32":
           for arg in esql_config:

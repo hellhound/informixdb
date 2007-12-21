@@ -23,6 +23,11 @@ INSTALLATION (UNIX)
 This distribution uses Python distutils to build and install the informixdb
 module.  It requires Python 2.2 or later.
 
+To compile InformixDB, you need to have Informix ESQL/C installed. ESQL/C
+is included with the Informix Client Software Development Kit (Informix CSDK),
+which is available free of charge at
+http://www.ibm.com/software/data/informix/tools/csdk/ .
+
 
 In a hurry?
 -----------

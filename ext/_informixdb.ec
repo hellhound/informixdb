@@ -1451,7 +1451,7 @@ $ifdef HAVE_ESQL9;
   else
 $endif;
   {
-    var->sqltype = CSTRINGTYPE;
+    var->sqltype = CVCHARTYPE;
     var->sqldata = malloc(n+1);
     var->sqllen = n+1;
     *var->sqlind = 0;
@@ -1797,6 +1797,10 @@ $endif;
       break;
     case SQLINTERVAL:
       var->sqltype = CINVTYPE;
+      break;
+    case SQLVCHAR:
+    case SQLNVCHAR:
+      var->sqltype = CVCHARTYPE;
       break;
     default: {
         int known_type = 0;
@@ -2391,16 +2395,17 @@ static PyObject *doCopy(struct sqlvar_struct *var,
     }
   }
   case SQLCHAR:
-  case SQLVCHAR:
   case SQLNCHAR:
-  case SQLNVCHAR:
-$ifdef HAVE_ESQL9;
-  case SQLLVARCHAR:
-$endif;
   {
       _clip_char((char*)data);
       return Py_BuildValue("s", (char*)data);
   }
+  case SQLVCHAR:
+  case SQLNVCHAR:
+$ifdef HAVE_ESQL9;
+  case SQLLVARCHAR:
+$endif;
+      return Py_BuildValue("s", (char*)data);
   case SQLFLOAT:
     return PyFloat_FromDouble(*(double*)data);
   case SQLSMFLOAT:

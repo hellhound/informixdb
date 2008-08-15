@@ -2753,6 +2753,7 @@ static void Cursor_dealloc(Cursor *self)
     Py_XDECREF(self->conn);
     Py_XDECREF(self->messages);
     Py_XDECREF(self->errorhandler);
+    Py_XDECREF(self->op);
 
     free(self->cursorName);
   }

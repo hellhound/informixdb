@@ -187,6 +187,7 @@ All DatabaseError exceptions, and their derived classes, provide the\n\
 following attributes:\n\
 \n\
 - sqlcode: The Informix SQLCODE associated with the error\n\
+- sqlerrm: The SQLERRM string associated with the error\n\
 - diagnostics: A list of dictionaries with keys 'sqlstate' and\n\
                'message' that describe the error in detail.");
 
@@ -3282,13 +3283,15 @@ static int Connection_setautocommit(Connection *self, PyObject *value,
 
 static PyObject* DatabaseError_init(PyObject* self, PyObject* args, PyObject* kwds)
 {
-  static char* kwdnames[] = { "self", "action", "sqlcode", "diagnostics", 0 }; 
+  static char* kwdnames[] = { "self", "action", "sqlcode", "diagnostics", 
+                              "sqlerrm", 0 }; 
   PyObject *action;
   PyObject *diags;
   long int sqlcode;
+  PyObject *sqlerrm;
 
-  if (!PyArg_ParseTupleAndKeywords(args, kwds, "OSlO!", kwdnames, &self,
-                                   &action, &sqlcode, &PyList_Type, &diags)) {
+  if (!PyArg_ParseTupleAndKeywords(args, kwds, "OSlO!O", kwdnames, &self,
+                         &action, &sqlcode, &PyList_Type, &diags, &sqlerrm)) {
     return NULL;
   }
 
@@ -3304,19 +3307,24 @@ static PyObject* DatabaseError_init(PyObject* self, PyObject* args, PyObject* kw
     return NULL;
   }
 
+  if (PyObject_SetAttrString(self, "sqlerrm", sqlerrm)) {
+    return NULL;
+  }
+
   Py_INCREF(Py_None);
   return Py_None;
 }
 
 static PyObject* DatabaseError_str(PyObject* self, PyObject* args)
 {
-  PyObject *str, *action, *sqlcode, *diags, *a, *f;
+  PyObject *str, *action, *sqlcode, *diags, *sqlerrm, *a, *f;
   int i;
   self = PyTuple_GetItem(args, 0);
 
   action = PyObject_GetAttrString(self, "action");
   sqlcode = PyObject_GetAttrString(self, "sqlcode");
   diags = PyObject_GetAttrString(self, "diagnostics");
+  sqlerrm = PyObject_GetAttrString(self, "sqlerrm");
 
   a = Py_BuildValue("(NN)", sqlcode, action);
   f = PyString_FromString("SQLCODE %d in %s: \n");
@@ -3335,6 +3343,17 @@ static PyObject* DatabaseError_str(PyObject* self, PyObject* args)
   }
 
   Py_DECREF(f);
+
+  if (PyObject_IsTrue(sqlerrm)) {
+    PyString_ConcatAndDel(&str, PyString_FromString("SQLERRM = "));
+    PyString_Concat(&str, sqlerrm);
+    PyString_ConcatAndDel(&str, PyString_FromString("\n"));
+  }
+
+  Py_DECREF(action);
+  Py_DECREF(sqlcode);
+  Py_DECREF(diags);
+  Py_DECREF(sqlerrm);
 
   return str;
 }
@@ -3402,7 +3421,7 @@ static PyObject* dberror_value(char *action)
     Py_DECREF(msg);
   }
 
-  return Py_BuildValue("(siN)", action, SQLCODE, list);
+  return Py_BuildValue("(siNs)", action, SQLCODE, list, sqlca.sqlerrm);
 }
 
 /* determines the type of an error by looking at SQLSTATE */

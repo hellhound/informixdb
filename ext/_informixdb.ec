@@ -34,11 +34,6 @@
 #include "longobject.h"
 #include "cobject.h"
 
-#include <limits.h>
-#define loc_t temp_loc_t
-#include <ctype.h>
-#undef loc_t
-
 #ifndef Py_RETURN_NONE
 #define Py_RETURN_NONE return Py_INCREF(Py_None), Py_None
 #endif
@@ -76,6 +71,7 @@ $ifdef HAVE_ESQL9;
 $else;
 typedef int mint;
 typedef long int4;
+typedef loc_t ifx_loc_t;
 $endif;
 
 #if HAVE_C_DATETIME == 1
@@ -105,8 +101,6 @@ $endif;
 #define PyDoc_STR(str)          (str)
 #define PyDoc_STRVAR(name, str) PyDoc_VAR(name) = PyDoc_STR(str)
 #endif
-
-EXEC SQL include sqlda.h;
 
 /* This seems to be the preferred way nowadays to mark up slots which
  * can't use static initializers.
@@ -1325,8 +1319,8 @@ $ifdef HAVE_ESQL9;
   else
 $endif;
   {
-    loc_t *loc;
-    loc = (loc_t*) malloc(sizeof(loc_t));
+    ifx_loc_t *loc;
+    loc = (ifx_loc_t*) malloc(sizeof(ifx_loc_t));
     loc->loc_loctype = LOCMEMORY;
     loc->loc_buffer = malloc((int)n);
     loc->loc_bufsize = (int)n;
@@ -1337,7 +1331,7 @@ $endif;
     memcpy(loc->loc_buffer, buf, (int)n);
 
     var->sqldata = (char *) loc;
-    var->sqllen = sizeof(loc_t);
+    var->sqllen = sizeof(ifx_loc_t);
     var->sqltype = CLOCATORTYPE;
     *var->sqlind = 0;
   }
@@ -1745,7 +1739,7 @@ static void bindOutput(Cursor *cur)
                                         var->sqllen,
                                         var->sqllen,
                                         Py_None, Py_None,
-                                        ISCOLUMNULLABLE(var->sqlflags));
+                                        !(var->sqltype & SQLNONULL));
     PyTuple_SET_ITEM(cur->description, pos, new_tuple);
 
     var->sqlind = &cur->indOut[pos];
@@ -1761,7 +1755,7 @@ $endif;
     switch(var->sqltype & SQLTYPE){
     case SQLBYTES:
     case SQLTEXT:
-      var->sqllen  = sizeof(loc_t);
+      var->sqllen  = sizeof(ifx_loc_t);
       var->sqltype = CLOCATORTYPE;
       break;
     case SQLSMFLOAT:
@@ -1881,7 +1875,7 @@ $endif;
     offset += var->sqllen;
 
     if (var->sqltype == CLOCATORTYPE) {
-      loc_t *loc = (loc_t*) var->sqldata;
+      ifx_loc_t *loc = (ifx_loc_t*) var->sqldata;
       loc->loc_loctype = LOCMEMORY;
       loc->loc_buffer = NULL;
       loc->loc_bufsize = -1;
@@ -2456,7 +2450,7 @@ $endif;
     PyObject *buffer;
     char *b_mem;
     Py_ssize_t b_len;
-    loc_t *l = (loc_t*)data;
+    ifx_loc_t *l = (ifx_loc_t*)data;
 
     l->loc_mflags |= LOC_ALLOC;
     buffer = PyBuffer_New(l->loc_size);
@@ -2617,7 +2611,7 @@ static void cleanInputBinding(Cursor *cur)
       /* may not actually exist in some err cases */
       if ( da->sqlvar[i].sqldata) {
         if (da->sqlvar[i].sqltype == CLOCATORTYPE) {
-          loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
+          ifx_loc_t *loc = (ifx_loc_t*) da->sqlvar[i].sqldata;
           if (loc->loc_buffer) {
             _loc_free(loc->loc_buffer);
           }
@@ -2662,7 +2656,7 @@ static void deleteOutputBinding(Cursor *cur)
     for (i=0; i<da->sqld; i++) {
       if (da->sqlvar[i].sqldata &&
           (da->sqlvar[i].sqltype == CLOCATORTYPE)) {
-        loc_t *loc = (loc_t*) da->sqlvar[i].sqldata;
+        ifx_loc_t *loc = (ifx_loc_t*) da->sqlvar[i].sqldata;
         if (loc->loc_buffer)
           _loc_free(loc->loc_buffer);
       }

@@ -2,7 +2,6 @@ import sys
 import os
 import shlex
 import re
-from distutils.core import setup, Extension
 from distutils.spawn import find_executable
 from distutils.sysconfig import get_python_inc
 from distutils.util import get_platform
@@ -10,6 +9,11 @@ from distutils.command.build_ext import build_ext as _build_ext
 from distutils.command.bdist_wininst import bdist_wininst as _bdist_wininst
 from distutils.dep_util import newer_group
 from distutils.errors import *
+
+try:
+    from setuptools import setup, Extension
+except ImportError:
+    from distutils.core import setup, Extension
 
 class build_ext(_build_ext):
     """ build_ext which can handle ESQL/C (*.ec) files """

@@ -1745,7 +1745,7 @@ static void bindOutput(Cursor *cur)
                                         var->sqllen,
                                         var->sqllen,
                                         Py_None, Py_None,
-                                        !(var->sqltype & SQLNONULL));
+                                        ISCOLUMNULLABLE(var->sqlflags));
     PyTuple_SET_ITEM(cur->description, pos, new_tuple);
 
     var->sqlind = &cur->indOut[pos];

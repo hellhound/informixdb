@@ -1978,7 +1978,11 @@ $ifdef HAVE_DESCRIBE_INPUT;
     if (self->conn->can_describe_input) {
       struct sqlda *tda = NULL;
       EXEC SQL DESCRIBE INPUT :queryName INTO tda;
-      ret_on_dberror_cursor(self, "DESCRIBE INPUT");
+      if (SQLCODE==-1834) {
+          tda = NULL;
+      } else {
+          ret_on_dberror_cursor(self, "DESCRIBE INPUT");
+      }
       if (tda) {
         copyDescr(tdaIn, tda);
         _da_free(tda);

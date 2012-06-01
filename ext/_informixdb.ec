@@ -112,11 +112,13 @@ $endif;
 typedef void sqlbreakcallbackfunc(mint);
 
 /************************* Helpers *************************/
+#define INT_FROM_VOIDPTR(x) ((int)((char*)x-(char*)0))
+
 static PyObject *get_bool_from_int(PyObject *self, void *closure)
 {
   int *p;
 
-  p = (int*)((char*)self+(int)closure);
+  p = (int*)((char*)self+INT_FROM_VOIDPTR(closure));
   if (*p) {
     Py_INCREF(Py_True);
     return Py_True;
@@ -130,7 +132,7 @@ static PyObject *get_bool_from_int(PyObject *self, void *closure)
 static int set_bool_to_int(PyObject *self, PyObject *value, void *closure)
 {
   int *p;
-  p = (int*)((char*)self+(int)closure);
+  p = (int*)((char*)self+INT_FROM_VOIDPTR(closure));
   *p = PyObject_IsTrue(value)?1:0;
   return 0;
 }
@@ -4147,7 +4149,7 @@ static PyObject *Sblob_specget(Sblob *self, void *closure)
   if (!lo_spec) {
     ret_on_dberror(self->conn, NULL, "ifx_lo_stat_cspec");
   }
-  switch ((int)closure) {
+  switch (INT_FROM_VOIDPTR(closure)) {
     case SBLOB_CSPEC_ESTBYTES:
       if (ifx_lo_specget_estbytes(lo_spec, &int8result)<0) {
         ret_on_dberror(self->conn, NULL, "ifx_lo_specget_estbytes");
@@ -4178,7 +4180,7 @@ static PyObject *Sblob_specget(Sblob *self, void *closure)
   if (ifx_lo_stat_free(lo_stat)<0) {
     ret_on_dberror(self->conn, NULL, "ifx_lo_stat_free");
   }
-  switch ((int)closure) {
+  switch (INT_FROM_VOIDPTR(closure)) {
     case SBLOB_CSPEC_EXTSZ:
     case SBLOB_CSPEC_FLAGS:
       return PyInt_FromLong((long)mintresult); break;

@@ -34,7 +34,7 @@ class build_ext(_build_ext):
 
         self.esql_informixdir = None
         self.esql_threadlib = None
-        self.esql_static = 0
+        self.esql_static = 1 # link staticly by default
         self.esql_parts = []
 
     def finalize_options(self):

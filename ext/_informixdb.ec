@@ -57,7 +57,8 @@ typedef int Py_ssize_t;
 #define _loc_free(x) SqlFreeMem(x, LOC_BUFFER_FREE)
 #endif
 #else
-#include <values.h>
+//#include <values.h>
+#include <value.h>
 #endif
 
 #include <sqltypes.h>
